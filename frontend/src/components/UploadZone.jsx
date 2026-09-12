@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
-import { UploadCloud, FileImage, Loader2, ImagePlus } from "lucide-react";
+import { UploadCloud, FileImage, Loader2 } from "lucide-react";
 
-const PRESET_SAMPLES = [
+const QUALITY_PRESET_SAMPLES = [
   { id: "clean", label: "Pristine Clean", file: "/samples/sample_pristine___clean.jpg", tag: "NOMINAL" },
   { id: "blur", label: "Defocus Blur", file: "/samples/sample_blur_defocus.jpg", tag: "BLUR" },
   { id: "underexp", label: "Underexposure", file: "/samples/sample_underexposure.jpg", tag: "DARK" },
@@ -12,7 +12,18 @@ const PRESET_SAMPLES = [
   { id: "multi", label: "Multi-Degraded", file: "/samples/sample_multi-degradation.jpg", tag: "MULTI" },
 ];
 
-export default function UploadZone({ onFileSelected, onPresetSelected, isAnalyzing }) {
+const DEEPFAKE_PRESET_SAMPLES = [
+  { id: "real_portrait_1", label: "Authentic Portrait 1", file: "/samples/deepfake/df_sample_real_portrait_1.jpg", tag: "REAL", isReal: true },
+  { id: "real_portrait_2", label: "Authentic Portrait 2", file: "/samples/deepfake/df_sample_real_portrait_2.jpg", tag: "REAL", isReal: true },
+  { id: "real_natural", label: "Authentic Natural", file: "/samples/deepfake/df_sample_real_natural.jpg", tag: "REAL", isReal: true },
+  { id: "real_studio", label: "Authentic Studio", file: "/samples/deepfake/df_sample_real_studio.jpg", tag: "REAL", isReal: true },
+  { id: "fake_easy", label: "Deepfake (Warped)", file: "/samples/deepfake/df_sample_fake_easy.jpg", tag: "FAKE", isReal: false },
+  { id: "fake_gan", label: "Deepfake (GAN Synth)", file: "/samples/deepfake/df_sample_fake_gan.jpg", tag: "FAKE", isReal: false },
+  { id: "fake_blend", label: "Deepfake (Boundary Blend)", file: "/samples/deepfake/df_sample_fake_blend.jpg", tag: "FAKE", isReal: false },
+  { id: "fake_hard", label: "Deepfake (Subtle Swap)", file: "/samples/deepfake/df_sample_fake_hard.jpg", tag: "FAKE", isReal: false },
+];
+
+export default function UploadZone({ onFileSelected, onPresetSelected, isAnalyzing, activePipeline = "quality" }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [loadingPreset, setLoadingPreset] = useState(null);
   const fileInputRef = useRef(null);
@@ -128,10 +139,10 @@ export default function UploadZone({ onFileSelected, onPresetSelected, isAnalyzi
       <div className="preset-bar" id="tour-preset-chips">
         <div className="preset-header mono">
           <FileImage size={13} className="text-secondary" />
-          <span>Quick Benchmark Presets:</span>
+          <span>{activePipeline === "deepfake" ? "Deepfake Forensics Benchmarks (Real vs Manipulated):" : "Quick Quality & Defect Presets:"}</span>
         </div>
         <div className="preset-chips-grid">
-          {PRESET_SAMPLES.map((preset) => (
+          {(activePipeline === "deepfake" ? DEEPFAKE_PRESET_SAMPLES : QUALITY_PRESET_SAMPLES).map((preset) => (
             <button
               key={preset.id}
               className="preset-btn mono"
@@ -141,7 +152,13 @@ export default function UploadZone({ onFileSelected, onPresetSelected, isAnalyzi
               {loadingPreset === preset.id ? (
                 <Loader2 size={12} className="spin" />
               ) : (
-                <span className={`preset-tag-indicator tag-${preset.id}`}></span>
+                <span
+                  className={`preset-tag-indicator ${
+                    activePipeline === "deepfake"
+                      ? preset.isReal ? "tag-real" : "tag-fake"
+                      : `tag-${preset.id}`
+                  }`}
+                ></span>
               )}
               <span className="preset-name">{preset.label}</span>
             </button>

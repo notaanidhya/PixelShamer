@@ -3,15 +3,17 @@ import Header from "./components/Header";
 import UploadZone from "./components/UploadZone";
 import ImageViewer from "./components/ImageViewer";
 import DiagnosticsPanel from "./components/DiagnosticsPanel";
+import DeepfakePanel from "./components/DeepfakePanel";
 import MetricsMatrix from "./components/MetricsMatrix";
 import HistoryTable from "./components/HistoryTable";
 import WalkthroughTour from "./components/WalkthroughTour";
-import { analyzeImage, getPresetAnalysis } from "./api/client";
+import { analyzeImage, analyzeDeepfake, getPresetAnalysis } from "./api/client";
 import { AlertCircle, X } from "lucide-react";
 import "./App.css";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("workspace");
+  const [activePipeline, setActivePipeline] = useState("quality"); // "quality" | "deepfake"
   const [activeResult, setActiveResult] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -31,9 +33,18 @@ export default function App() {
     } catch (e) {}
   }, []);
 
+  const handlePipelineChange = (pipeline) => {
+    if (pipeline === activePipeline) return;
+    setActivePipeline(pipeline);
+    setActiveResult(null);
+    setPreviewUrl(null);
+    setErrorMsg(null);
+  };
+
   const handleFileSelected = async (file) => {
     if (!file) return;
     setErrorMsg(null);
+    setActiveResult(null); // Immediately purge previous image analysis result
 
     // Create local preview immediately
     const localUrl = URL.createObjectURL(file);
@@ -41,7 +52,12 @@ export default function App() {
     setIsAnalyzing(true);
 
     try {
-      const data = await analyzeImage(file);
+      let data;
+      if (activePipeline === "deepfake") {
+        data = await analyzeDeepfake(file);
+      } else {
+        data = await analyzeImage(file);
+      }
       setActiveResult(data);
     } catch (err) {
       console.error("Analysis failed:", err);
@@ -55,27 +71,40 @@ export default function App() {
   const handlePresetSelected = async (preset) => {
     if (!preset) return;
     setErrorMsg(null);
+    setActiveResult(null); // Immediately purge previous image analysis result
     setPreviewUrl(preset.file);
     setIsAnalyzing(true);
 
     try {
-      // 1. Fast path: load pre-computed telemetry directly from Neon DB (instant ~50ms)
-      const data = await getPresetAnalysis(preset.id);
-      setActiveResult(data);
-    } catch (err) {
-      console.warn("Fast preset fetch failed, falling back to direct analysis...", err);
-      // Fallback: fetch blob and run standard analysis
-      try {
+      if (activePipeline === "deepfake") {
+        // Deepfake preset: fetch sample blob and execute deepfake analysis
         const response = await fetch(preset.file);
+        if (!response.ok) throw new Error(`Preset file not found: ${preset.file}`);
         const blob = await response.blob();
         const filename = preset.file.split("/").pop();
         const file = new File([blob], filename, { type: blob.type || "image/jpeg" });
-        const data = await analyzeImage(file);
+        const data = await analyzeDeepfake(file);
         setActiveResult(data);
-      } catch (fallbackErr) {
-        const detail = fallbackErr.response?.data?.detail || fallbackErr.message || "Failed to load preset.";
-        setErrorMsg(detail);
+      } else {
+        // Quality preset: 1. Fast path: load pre-computed telemetry directly from DB
+        try {
+          const data = await getPresetAnalysis(preset.id);
+          setActiveResult(data);
+        } catch (err) {
+          console.warn("Fast preset fetch failed, falling back to direct analysis...", err);
+          // Fallback: fetch blob and run standard quality analysis
+          const response = await fetch(preset.file);
+          const blob = await response.blob();
+          const filename = preset.file.split("/").pop();
+          const file = new File([blob], filename, { type: blob.type || "image/jpeg" });
+          const data = await analyzeImage(file);
+          setActiveResult(data);
+        }
       }
+    } catch (err) {
+      console.error("Analysis failed:", err);
+      const detail = err.response?.data?.detail || err.message || "Failed to load preset.";
+      setErrorMsg(detail);
     } finally {
       setIsAnalyzing(false);
     }
@@ -98,6 +127,8 @@ export default function App() {
       <Header
         activeTab={activeTab}
         onTabChange={setActiveTab}
+        activePipeline={activePipeline}
+        onPipelineChange={handlePipelineChange}
         onStartTour={() => setIsTourOpen(true)}
       />
 
@@ -123,30 +154,39 @@ export default function App() {
               onFileSelected={handleFileSelected}
               onPresetSelected={handlePresetSelected}
               isAnalyzing={isAnalyzing}
+              activePipeline={activePipeline}
             />
 
             {/* Split Screen Dual Workspace */}
             <div className="grid-2col workspace-grid">
               {/* Left Column: Spatial Viewport & Heatmap Comparator */}
               <div className="workspace-col-left">
-                <ImageViewer result={activeResult} previewUrl={previewUrl} />
+                <ImageViewer result={activeResult} previewUrl={previewUrl} isAnalyzing={isAnalyzing} />
               </div>
 
               {/* Right Column: Real-time Telemetry & Issues Stream */}
               <div className="workspace-col-right">
-                <DiagnosticsPanel result={activeResult} isAnalyzing={isAnalyzing} />
+                {activePipeline === "deepfake" ? (
+                  <DeepfakePanel result={activeResult} isAnalyzing={isAnalyzing} />
+                ) : (
+                  <DiagnosticsPanel result={activeResult} isAnalyzing={isAnalyzing} />
+                )}
               </div>
             </div>
 
-            {/* Bottom: 22-Metric Telemetry Matrix */}
+            {/* Bottom: Extracted Telemetry Matrix (Quality & Deepfake Modes) */}
             {activeResult && activeResult.statistics && (
               <div className="metrics-matrix-wrapper">
-                <MetricsMatrix statistics={activeResult.statistics} />
+                <MetricsMatrix
+                  statistics={activeResult.statistics}
+                  pipeline={activePipeline}
+                  result={activeResult}
+                />
               </div>
             )}
           </div>
         ) : (
-          <HistoryTable />
+          <HistoryTable activePipeline={activePipeline} onPipelineChange={setActivePipeline} />
         )}
       </main>
 

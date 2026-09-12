@@ -12,7 +12,9 @@ load_dotenv()
 from sqlalchemy import text, inspect
 from backend.app.db.session import engine, Base
 from backend.app.routers import analysis
+from backend.app.routers import deepfake as deepfake_router
 from backend.app.services.inference import inference_service
+from backend.app.services.deepfake_inference import deepfake_service
 from backend.app.schemas.schemas import HealthResponse
 
 logging.basicConfig(
@@ -27,6 +29,8 @@ UPLOAD_DIR = os.getenv(
 )
 os.makedirs(os.path.join(UPLOAD_DIR, "images"), exist_ok=True)
 os.makedirs(os.path.join(UPLOAD_DIR, "heatmaps"), exist_ok=True)
+os.makedirs(os.path.join(UPLOAD_DIR, "deepfake", "images"), exist_ok=True)
+os.makedirs(os.path.join(UPLOAD_DIR, "deepfake", "heatmaps"), exist_ok=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -53,13 +57,19 @@ async def lifespan(app: FastAPI):
     logger.info("Loading PyTorch CV models into memory...")
     try:
         inference_service.load_models()
-        logger.info("Models loaded successfully. Service ready for inference.")
+        logger.info("Quality Assessment models loaded successfully.")
     except Exception as e:
-        logger.error(f"Failed to load models during startup: {e}", exc_info=True)
+        logger.error(f"Failed to load quality models during startup: {e}", exc_info=True)
+
+    try:
+        deepfake_service.load_models()
+        logger.info("Deepfake Detection models loaded successfully.")
+    except Exception as e:
+        logger.error(f"Failed to load deepfake models during startup: {e}", exc_info=True)
 
     yield
     
-    logger.info("Shutting down Image Quality Assessment service...")
+    logger.info("Shutting down Image Forensics Suite service...")
 
 app = FastAPI(
     title="PixelShamer — AI Image Quality & Defect Detection API",
@@ -88,6 +98,7 @@ app.add_middleware(
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 app.include_router(analysis.router)
+app.include_router(deepfake_router.router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -106,14 +117,16 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.api_route("/api/health", methods=["GET", "HEAD"], response_model=HealthResponse, tags=["System"])
 @app.api_route("/health", methods=["GET", "HEAD"], response_model=HealthResponse, tags=["System"])
 async def health_check():
-    """Health check endpoint exposing service readiness and model loading status."""
+    """Health check endpoint exposing service readiness and model loading status for both pipelines."""
     return HealthResponse(
         status="ok",
-        version="1.0.0",
+        version="1.1.0",
         models_loaded=inference_service.is_ready,
+        deepfake_models_loaded=deepfake_service.is_ready,
         details={
             "environment": os.getenv("APP_ENV", "development"),
-            "device": inference_service.device
+            "quality_device": str(inference_service.device),
+            "deepfake_device": str(deepfake_service.device)
         }
     )
 

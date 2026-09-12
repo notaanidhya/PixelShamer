@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { Activity, Layers, History, ShieldCheck, AlertCircle, RefreshCw, HelpCircle } from "lucide-react";
+import { Activity, Layers, History, ShieldCheck, RefreshCw, HelpCircle } from "lucide-react";
 import { checkHealth } from "../api/client";
 
-export default function Header({ activeTab, onTabChange, onStartTour }) {
-  const [health, setHealth] = useState({ status: "checking", models_loaded: false, latency: null });
+export default function Header({ activeTab, onTabChange, onStartTour, activePipeline = "quality", onPipelineChange }) {
+  const [health, setHealth] = useState({ status: "checking", models_loaded: false, deepfake_models_loaded: false, latency: null });
 
   const fetchHealth = async () => {
     try {
@@ -11,10 +11,11 @@ export default function Header({ activeTab, onTabChange, onStartTour }) {
       setHealth({
         status: data.status === "ok" ? "online" : "degraded",
         models_loaded: data.models_loaded,
+        deepfake_models_loaded: data.deepfake_models_loaded,
         latency: data.latency,
       });
     } catch (err) {
-      setHealth({ status: "offline", models_loaded: false, latency: null });
+      setHealth({ status: "offline", models_loaded: false, deepfake_models_loaded: false, latency: null });
     }
   };
 
@@ -30,46 +31,62 @@ export default function Header({ activeTab, onTabChange, onStartTour }) {
         {/* Brand identity */}
         <div className="brand-section">
           <div className="brand-logo">
-            <Layers size={20} className="text-highlight" />
+            <Layers size={18} className="text-highlight" />
           </div>
-          <div>
-            <div className="brand-title">
-              Pixel<span className="brand-sub">Shamer</span>
-            </div>
-            <div className="brand-caption mono">
-              Smart City Living Lab • Hybrid Image Quality & Defect Detection
-            </div>
+          <div className="brand-title">
+            Pixel<span className="brand-sub">Shamer</span>
           </div>
         </div>
 
-        {/* View Switcher Tabs (Square / Tabbed - No generic pills) */}
-        <nav className="header-nav" id="tour-nav-tabs">
+        {/* Forensic Pipeline Mode Switcher */}
+        <div className="pipeline-switcher mono">
+          <button
+            type="button"
+            className={`pipeline-btn ${activePipeline === "quality" ? "active" : ""}`}
+            onClick={() => onPipelineChange("quality")}
+            title="Switch to Image Quality Assessment & Surface Defect Localization"
+          >
+            <Activity size={14} />
+            <span>Quality & Defect</span>
+          </button>
+          <button
+            type="button"
+            className={`pipeline-btn ${activePipeline === "deepfake" ? "active" : ""}`}
+            onClick={() => onPipelineChange("deepfake")}
+            title="Switch to Deepfake Face Forgery Detection & Grad-CAM Analysis"
+          >
+            <ShieldCheck size={14} />
+            <span>Deepfake Detection</span>
+          </button>
+        </div>
+
+        {/* View Switcher Tabs */}
+        <nav className="header-nav mono" id="tour-nav-tabs">
           <button
             className={`nav-tab ${activeTab === "workspace" ? "active" : ""}`}
             onClick={() => onTabChange("workspace")}
             id="tour-workspace-nav"
           >
-            <Activity size={15} />
-            <span>Inspection Workbench</span>
+            <Activity size={14} />
+            <span>Workbench</span>
           </button>
           <button
             className={`nav-tab ${activeTab === "history" ? "active" : ""}`}
             onClick={() => onTabChange("history")}
             id="tour-history-nav"
           >
-            <History size={15} />
+            <History size={14} />
             <span>Audit History</span>
           </button>
         </nav>
 
         {/* Guided Tour Trigger Button */}
         <button
-          className="btn btn-secondary btn-sm mono tour-launch-btn"
+          className="header-tour-btn mono tour-launch-btn"
           onClick={onStartTour}
           title="Launch Interactive Guided Tour"
-          style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", padding: "0.4rem 0.75rem", fontSize: "0.78rem" }}
         >
-          <HelpCircle size={14} className="text-highlight" />
+          <HelpCircle size={14} />
           <span>Guided Tour</span>
         </button>
 

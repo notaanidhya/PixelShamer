@@ -1,14 +1,20 @@
 import React, { useState, useEffect } from "react";
-import { Eye, Layers, Sliders, Image, Maximize2 } from "lucide-react";
+import { Eye, Layers, Sliders } from "lucide-react";
 import { getAssetUrl, formatLocalTimestamp } from "../api/client";
 
-export default function ImageViewer({ result, previewUrl }) {
+export default function ImageViewer({ result, previewUrl, isAnalyzing }) {
   const [viewMode, setViewMode] = useState("overlay"); // "original", "heatmap", "overlay"
   const [overlayOpacity, setOverlayOpacity] = useState(70);
   const [imageMeta, setImageMeta] = useState({ width: null, height: null });
 
+  // Reset metadata when previewUrl or image changes
+  useEffect(() => {
+    setImageMeta({ width: null, height: null });
+  }, [previewUrl]);
+
+  // While analyzing, strictly suppress the previous image's heatmap overlay
   const originalSrc = previewUrl || (result?.image_url ? getAssetUrl(result.image_url) : null);
-  const heatmapSrc = result?.heatmap_url ? getAssetUrl(result.heatmap_url) : null;
+  const heatmapSrc = (!isAnalyzing && result?.heatmap_url) ? getAssetUrl(result.heatmap_url) : null;
 
   // Read natural dimensions
   const handleImageLoaded = (e) => {
@@ -27,7 +33,7 @@ export default function ImageViewer({ result, previewUrl }) {
         </div>
 
         {/* View mode toggle tabs (Geometric / Monospace - No generic pills) */}
-        {heatmapSrc && (
+        {heatmapSrc && !isAnalyzing && (
           <div className="view-mode-tabs mono">
             <button
               className={`mode-tab ${viewMode === "original" ? "active" : ""}`}
@@ -54,22 +60,35 @@ export default function ImageViewer({ result, previewUrl }) {
       <div className="image-viewport-container">
         {originalSrc ? (
           <div className="image-canvas-wrapper">
-            {/* Base Image */}
+            {/* Base Image with explicit key so React remounts on source change */}
             <img
-              src={viewMode === "heatmap" && heatmapSrc ? heatmapSrc : originalSrc}
+              key={originalSrc}
+              src={viewMode === "heatmap" && heatmapSrc && !isAnalyzing ? heatmapSrc : originalSrc}
               alt="Inspection Target"
               className="canvas-image base-layer"
               onLoad={handleImageLoaded}
             />
 
-            {/* Overlay Layer (Shown only in overlay mode) */}
-            {viewMode === "overlay" && heatmapSrc && (
+            {/* Overlay Layer (Shown strictly when not analyzing and heatmap is available) */}
+            {viewMode === "overlay" && heatmapSrc && !isAnalyzing && (
               <img
+                key={`overlay-${heatmapSrc}`}
                 src={heatmapSrc}
                 alt="Anomaly Heatmap Overlay"
                 className="canvas-image overlay-layer"
                 style={{ opacity: overlayOpacity / 100 }}
               />
+            )}
+
+            {/* Active Scanning Animation while model processes the new image */}
+            {isAnalyzing && (
+              <div className="viewport-scanning-overlay">
+                <div className="scanning-beam"></div>
+                <div className="scanning-pill mono">
+                  <span className="pulse-dot"></span>
+                  <span>ANALYZING IMAGE TELEMETRY...</span>
+                </div>
+              </div>
             )}
           </div>
         ) : (
@@ -86,14 +105,17 @@ export default function ImageViewer({ result, previewUrl }) {
           {/* Metadata telemetry */}
           <div className="viewport-meta mono">
             <span className="meta-item">
-              <span className="text-muted">FILE:</span> {result?.filename || "Input Stream"}
+              <span className="text-muted">FILE:</span>{" "}
+              {isAnalyzing
+                ? "Processing Frame..."
+                : (result?.filename || previewUrl?.split("/").pop() || "Input Stream")}
             </span>
             {imageMeta.width && (
               <span className="meta-item">
                 <span className="text-muted">RES:</span> {imageMeta.width}×{imageMeta.height} px
               </span>
             )}
-            {result?.processed_at && (
+            {!isAnalyzing && result?.processed_at && (
               <span className="meta-item">
                 <span className="text-muted">ANALYZED:</span>{" "}
                 {formatLocalTimestamp(result.processed_at, "time")}
@@ -102,7 +124,7 @@ export default function ImageViewer({ result, previewUrl }) {
           </div>
 
           {/* Opacity slider for Overlay Mode */}
-          {heatmapSrc && viewMode === "overlay" && (
+          {heatmapSrc && !isAnalyzing && viewMode === "overlay" && (
             <div className="opacity-slider-control mono">
               <Sliders size={13} className="text-secondary" />
               <span>Heatmap Blend:</span>

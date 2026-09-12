@@ -31,4 +31,5 @@ class HealthResponse(BaseModel):
     status: str
     version: str = "1.0.0"
     models_loaded: bool = False
+    deepfake_models_loaded: bool = False
     details: Optional[Dict[str, Any]] = None

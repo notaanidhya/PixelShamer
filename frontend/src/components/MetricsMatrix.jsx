@@ -1,12 +1,13 @@
 import React, { useState } from "react";
-import { Terminal, ChevronDown, ChevronUp, BarChart2 } from "lucide-react";
+import { ChevronDown, ChevronUp, BarChart2 } from "lucide-react";
 
-export default function MetricsMatrix({ statistics }) {
+export default function MetricsMatrix({ statistics, pipeline = "quality", result = null }) {
   const [isOpen, setIsOpen] = useState(true);
 
   if (!statistics) return null;
 
   const all = statistics.all_features || {};
+  const isDeepfake = pipeline === "deepfake";
   const reconErr = statistics.reconstruction_error ?? null;
 
   const metricGroups = [
@@ -15,7 +16,7 @@ export default function MetricsMatrix({ statistics }) {
       items: [
         { key: "laplacian_variance", label: "Laplacian Variance", val: all.laplacian_variance ?? statistics.laplacian_variance, unit: "var" },
         { key: "tenengrad_mean", label: "Tenengrad Mean", val: all.tenengrad_mean, unit: "grad" },
-        { key: "fft_high_freq_ratio", label: "FFT High-Freq Ratio", val: all.fft_high_freq_ratio, unit: "ratio" },
+        { key: "fft_high_freq_ratio", label: "FFT High-Freq Ratio", val: all.fft_high_freq_ratio ?? statistics.fft_high_freq_ratio, unit: "ratio" },
         { key: "edge_density", label: "Canny Edge Density", val: all.edge_density, unit: "frac" },
       ],
     },
@@ -33,7 +34,7 @@ export default function MetricsMatrix({ statistics }) {
     {
       category: "Noise & Structural Texture",
       items: [
-        { key: "noise_sigma_immerkaar", label: "Immerkær Noise σ", val: all.noise_sigma_immerkaar ?? statistics.noise_sigma_immerkaar, unit: "σ" },
+        { key: "noise_sigma_immerkaar", label: "Immerkär Noise σ", val: all.noise_sigma_immerkaar ?? statistics.noise_sigma_immerkaar ?? statistics.noise_sigma, unit: "σ" },
         { key: "flat_region_variance", label: "Flat Region Variance", val: all.flat_region_variance, unit: "var" },
         { key: "snr_proxy", label: "Signal-to-Noise Proxy", val: all.snr_proxy, unit: "SNR" },
         { key: "glcm_contrast", label: "GLCM Contrast", val: all.glcm_contrast ?? statistics.glcm_contrast, unit: "tex" },
@@ -42,16 +43,67 @@ export default function MetricsMatrix({ statistics }) {
       ],
     },
     {
-      category: "Color, Compression & Anomaly",
+      category: isDeepfake ? "Color & Compression Artifacts" : "Color, Compression & Anomaly",
       items: [
         { key: "mean_saturation", label: "HSV Mean Saturation", val: all.mean_saturation ?? statistics.mean_saturation, unit: "0-1" },
         { key: "channel_imbalance", label: "RGB Channel Imbalance", val: all.channel_imbalance, unit: "dev" },
         { key: "colorfulness", label: "Hasler Colorfulness", val: all.colorfulness, unit: "idx" },
         { key: "dct_blockiness", label: "8×8 DCT Blockiness", val: all.dct_blockiness ?? statistics.dct_blockiness, unit: "jump" },
         { key: "hf_energy_loss", label: "HF Energy Loss", val: all.hf_energy_loss, unit: "ratio" },
-        { key: "reconstruction_error", label: "Autoencoder Peak Error", val: reconErr, unit: "MSE" },
+        ...(isDeepfake
+          ? [{ key: "calibrated_threshold", label: "Calibrated Threshold (τ)", val: statistics.calibrated_threshold ?? 0.58, unit: "τ" }]
+          : [{ key: "reconstruction_error", label: "Autoencoder Peak Error", val: reconErr, unit: "MSE" }]),
       ],
     },
+    ...(isDeepfake
+      ? [
+          {
+            category: "Deepfake Forensics & Geometry",
+            items: [
+              {
+                key: "fake_confidence",
+                label: "EfficientNet Fake Conf",
+                val: result?.fake_confidence !== undefined ? `${(result.fake_confidence * 100).toFixed(1)}%` : "—",
+                unit: "%",
+              },
+              {
+                key: "verdict",
+                label: "Forensic Verdict",
+                val: result?.verdict || "—",
+                unit: "",
+              },
+              {
+                key: "face_crop",
+                label: "Face Crop Geometry",
+                val: statistics.face_width_px
+                  ? `${statistics.face_width_px} × ${statistics.face_height_px} px`
+                  : (result?.face_bbox ? `${result.face_bbox.w} × ${result.face_bbox.h} px` : "N/A"),
+                unit: "px",
+              },
+              {
+                key: "face_coords",
+                label: "Bounding Box Origin",
+                val: statistics.face_x !== undefined && statistics.face_x !== null
+                  ? `X:${statistics.face_x}, Y:${statistics.face_y}`
+                  : (result?.face_bbox ? `X:${result.face_bbox.x}, Y:${result.face_bbox.y}` : "N/A"),
+                unit: "loc",
+              },
+              {
+                key: "face_detector",
+                label: "Face Localization",
+                val: result?.face_detected !== false ? "Dual Haar Cascade" : "Not Localized",
+                unit: "cv2",
+              },
+              {
+                key: "explainability",
+                label: "Explainability Hook",
+                val: "Grad-CAM (MBConv-6)",
+                unit: "layer",
+              },
+            ],
+          },
+        ]
+      : []),
   ];
 
   const formatValue = (val) => {
@@ -69,7 +121,11 @@ export default function MetricsMatrix({ statistics }) {
       <button className="metrics-toggle-header" onClick={() => setIsOpen(!isOpen)}>
         <div className="panel-title">
           <BarChart2 size={15} />
-          <span>Extracted 22-Metric Computer Vision Matrix</span>
+          <span>
+            {isDeepfake
+              ? "Extracted 22-Metric Computer Vision & Deepfake Forensic Matrix"
+              : "Extracted 22-Metric Computer Vision Matrix"}
+          </span>
         </div>
         <div className="toggle-indicator mono">
           <span>{isOpen ? "COLLAPSE TELEMETRY" : "EXPAND TELEMETRY"}</span>

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { History, Search, Trash2, Eye, RefreshCw, ChevronLeft, ChevronRight, AlertCircle, User, Globe } from "lucide-react";
-import { getResults, deleteResult, getAssetUrl, formatLocalTimestamp } from "../api/client";
+import { Search, Trash2, Eye, RefreshCw, ChevronLeft, ChevronRight, AlertCircle, User, Globe, ShieldCheck, Activity } from "lucide-react";
+import { getResults, deleteResult, getDeepfakeResults, deleteDeepfakeResult, getAssetUrl, formatLocalTimestamp } from "../api/client";
 import DetailModal from "./DetailModal";
 
-const FILTER_TABS = ["ALL", "ACCEPTABLE", "DEGRADED", "DEFECTIVE"];
+const QUALITY_FILTER_TABS = ["ALL", "ACCEPTABLE", "DEGRADED", "DEFECTIVE"];
+const DEEPFAKE_FILTER_TABS = ["ALL", "AUTHENTIC", "SUSPICIOUS", "LIKELY_FAKE"];
 
-export default function HistoryTable() {
+export default function HistoryTable({ activePipeline = "quality", onPipelineChange }) {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -18,10 +19,17 @@ export default function HistoryTable() {
   const [selectedItem, setSelectedItem] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
+  const filterTabs = activePipeline === "deepfake" ? DEEPFAKE_FILTER_TABS : QUALITY_FILTER_TABS;
+
   const fetchHistory = async () => {
     setIsLoading(true);
     try {
-      const data = await getResults(page, limit, filterLabel, scope);
+      let data;
+      if (activePipeline === "deepfake") {
+        data = await getDeepfakeResults(page, limit, filterLabel, scope);
+      } else {
+        data = await getResults(page, limit, filterLabel, scope);
+      }
       setItems(data.items || []);
       setTotal(data.total || 0);
       setTotalPages(data.pages || 1);
@@ -33,15 +41,24 @@ export default function HistoryTable() {
   };
 
   useEffect(() => {
+    setPage(1);
+    setFilterLabel("ALL");
+  }, [activePipeline]);
+
+  useEffect(() => {
     fetchHistory();
-  }, [page, filterLabel, scope]);
+  }, [page, filterLabel, scope, activePipeline]);
 
   const handleDelete = async (id, e) => {
     e.stopPropagation();
     if (!window.confirm(`Delete analysis record #${id}?`)) return;
     try {
       setDeletingId(id);
-      await deleteResult(id);
+      if (activePipeline === "deepfake") {
+        await deleteDeepfakeResult(id);
+      } else {
+        await deleteResult(id);
+      }
       setItems((prev) => prev.filter((it) => it.id !== id));
       setTotal((prev) => Math.max(0, prev - 1));
     } catch (err) {
@@ -60,37 +77,62 @@ export default function HistoryTable() {
       <div className="workbench-panel">
         {/* Table Controls Bar */}
         <div className="history-controls-bar" style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", justifyContent: "space-between", alignItems: "center" }}>
-          {/* Scope Selector: My Session vs Global Feed */}
-          <div className="filter-tabs-group mono" style={{ display: "flex", gap: "0.25rem" }}>
-            <button
-              className={`filter-tab ${scope === "session" ? "active" : ""}`}
-              onClick={() => {
-                setScope("session");
-                setPage(1);
-              }}
-              title="Show records analyzed in your current browser session"
-              style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}
-            >
-              <User size={13} />
-              <span>My Session</span>
-            </button>
-            <button
-              className={`filter-tab ${scope === "global" ? "active" : ""}`}
-              onClick={() => {
-                setScope("global");
-                setPage(1);
-              }}
-              title="Show all benchmark & historical records across all sessions"
-              style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}
-            >
-              <Globe size={13} />
-              <span>Global Feed</span>
-            </button>
+          
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
+            {/* Pipeline Toggle within History */}
+            {onPipelineChange && (
+              <div className="pipeline-switcher mono" style={{ marginRight: "0.25rem" }}>
+                <button
+                  type="button"
+                  className={`pipeline-btn ${activePipeline === "quality" ? "active" : ""}`}
+                  onClick={() => onPipelineChange("quality")}
+                >
+                  <Activity size={12} />
+                  <span>Quality</span>
+                </button>
+                <button
+                  type="button"
+                  className={`pipeline-btn ${activePipeline === "deepfake" ? "active" : ""}`}
+                  onClick={() => onPipelineChange("deepfake")}
+                >
+                  <ShieldCheck size={12} />
+                  <span>Deepfake</span>
+                </button>
+              </div>
+            )}
+
+            {/* Scope Selector: My Session vs Global Feed */}
+            <div className="filter-tabs-group mono" style={{ display: "flex", gap: "0.25rem" }}>
+              <button
+                className={`filter-tab ${scope === "session" ? "active" : ""}`}
+                onClick={() => {
+                  setScope("session");
+                  setPage(1);
+                }}
+                title="Filter records created in your current browser session"
+                style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}
+              >
+                <User size={13} />
+                <span>My Session</span>
+              </button>
+              <button
+                className={`filter-tab ${scope === "global" ? "active" : ""}`}
+                onClick={() => {
+                  setScope("global");
+                  setPage(1);
+                }}
+                title="Show all benchmark & historical records across all sessions"
+                style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}
+              >
+                <Globe size={13} />
+                <span>Global Feed</span>
+              </button>
+            </div>
           </div>
 
           {/* Status Filter Tabs (Square tabs) */}
           <div className="filter-tabs-group mono">
-            {FILTER_TABS.map((tab) => (
+            {filterTabs.map((tab) => (
               <button
                 key={tab}
                 className={`filter-tab ${filterLabel === tab ? "active" : ""}`}
@@ -130,9 +172,9 @@ export default function HistoryTable() {
               <tr>
                 <th style={{ width: "70px" }}>Preview</th>
                 <th>Record ID & Filename</th>
-                <th>Score</th>
+                <th>{activePipeline === "deepfake" ? "Fake Confidence" : "Score"}</th>
                 <th>Classification</th>
-                <th>Detected Issues</th>
+                <th>{activePipeline === "deepfake" ? "Face Status" : "Detected Issues"}</th>
                 <th>Timestamp</th>
                 <th style={{ textAlign: "right" }}>Actions</th>
               </tr>
@@ -173,26 +215,40 @@ export default function HistoryTable() {
                     </td>
                     <td>
                       <span className="table-score-val text-highlight">
-                        {row.quality_score?.toFixed(1) ?? "—"}
+                        {activePipeline === "deepfake"
+                          ? `${(row.fake_confidence * 100).toFixed(1)}%`
+                          : (row.quality_score?.toFixed(1) ?? "—")}
                       </span>
                     </td>
                     <td>
-                      <span className={`status-tag ${row.quality_label?.toLowerCase()}`}>
-                        {row.quality_label}
-                      </span>
+                      {activePipeline === "deepfake" ? (
+                        <span className={`status-tag ${row.verdict?.toLowerCase()}`}>
+                          {row.verdict}
+                        </span>
+                      ) : (
+                        <span className={`status-tag ${row.quality_label?.toLowerCase()}`}>
+                          {row.quality_label}
+                        </span>
+                      )}
                     </td>
                     <td>
-                      <div className="table-issues-chips">
-                        {row.issues && row.issues.length > 0 ? (
-                          row.issues.map((iss, i) => (
-                            <span key={i} className="issue-micro-chip">
-                              {iss.type} ({Math.round(iss.confidence * 100)}%)
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-muted">None (Clean)</span>
-                        )}
-                      </div>
+                      {activePipeline === "deepfake" ? (
+                        <span className={row.face_detected ? "text-emerald-400" : "text-muted"}>
+                          {row.face_detected ? "Localized" : "Not Found"}
+                        </span>
+                      ) : (
+                        <div className="table-issues-chips">
+                          {row.issues && row.issues.length > 0 ? (
+                            row.issues.map((iss, i) => (
+                              <span key={i} className="issue-micro-chip">
+                                {iss.type} ({Math.round(iss.confidence * 100)}%)
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-muted">None (Clean)</span>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td>
                       <span className="text-secondary text-sm">

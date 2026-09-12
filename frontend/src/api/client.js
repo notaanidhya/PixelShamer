@@ -114,4 +114,44 @@ export const deleteResult = async (id) => {
   return true;
 };
 
+// --- Deepfake Detection API Client Methods ---
+
+export const analyzeDeepfake = async (file) => {
+  const formData = new FormData();
+  formData.append("image", file);
+
+  const sid = getSessionId();
+  const response = await apiClient.post(`/api/deepfake/analyze?session_id=${encodeURIComponent(sid)}`, formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+      "X-Session-ID": sid,
+    },
+  });
+  return response.data;
+};
+
+export const getDeepfakeResults = async (page = 1, limit = 10, verdict = null, scope = "session") => {
+  const params = {
+    page,
+    limit,
+    scope,
+    session_id: getSessionId(),
+  };
+  if (verdict && verdict !== "ALL") {
+    params.verdict = verdict;
+  }
+  const response = await apiClient.get("/api/deepfake/results", { params });
+  return response.data;
+};
+
+export const getDeepfakeResultById = async (id) => {
+  const response = await apiClient.get(`/api/deepfake/results/${id}`);
+  return response.data;
+};
+
+export const deleteDeepfakeResult = async (id) => {
+  await apiClient.delete(`/api/deepfake/results/${id}`);
+  return true;
+};
+
 export default apiClient;
