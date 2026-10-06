@@ -38,23 +38,34 @@ class DeepfakeInferenceService:
 
     def load_models(self, model_path: str = None):
         """Loads EfficientNet-B2 weights, initializes Grad-CAM, and prepares face detectors."""
+        # Check for B5 checkpoint first, fallback to default
         if model_path is None:
-            model_path = os.path.join(BASE_DIR, "ml", "deepfake", "models", "efficientnet_deepfake_best.pt")
+            b5_path = os.path.join(BASE_DIR, "ml", "deepfake", "models", "efficientnet_b5_deepfake_best.pt")
+            default_path = os.path.join(BASE_DIR, "ml", "deepfake", "models", "efficientnet_deepfake_best.pt")
+            model_path = b5_path if os.path.exists(b5_path) else default_path
 
         logger.info(f"Loading Deepfake Model from: {model_path} on {self.device}")
-        
-        self.model = build_model(pretrained=False, freeze_early=False).to(self.device)
+
+        arch = "efficientnet_b5"
+        img_size = 288
+        checkpoint = None
+
         if os.path.exists(model_path):
             checkpoint = torch.load(model_path, map_location=self.device, weights_only=True)
-            self.model.load_state_dict(checkpoint["model_state"])
+            arch = checkpoint.get("architecture", "efficientnet_b2" if "b2" in os.path.basename(model_path) else "efficientnet_b5")
+            img_size = checkpoint.get("img_size", 288 if "b5" in arch else 260)
             self.calibrated_threshold = checkpoint.get("optimal_threshold", 0.580)
-            logger.info(f"Loaded checkpoint with calibrated threshold: {self.calibrated_threshold:.3f}")
+            logger.info(f"Loaded checkpoint ({arch}, {img_size}x{img_size}) with calibrated threshold: {self.calibrated_threshold:.3f}")
         else:
             logger.warning(f"Checkpoint not found at {model_path}. Running with initialized weights.")
 
+        self.model = build_model(model_name=arch, pretrained=False, freeze_early=False).to(self.device)
+        if checkpoint is not None:
+            self.model.load_state_dict(checkpoint["model_state"])
+
         self.model.eval()
         self.gradcam = GradCAM(self.model)
-        self.transforms = get_val_transforms()
+        self.transforms = get_val_transforms(img_size=img_size)
 
         # Load bundled OpenCV Haar Cascades for face detection
         bundled_dir = os.path.join(BASE_DIR, "ml", "deepfake", "models", "haarcascades")
