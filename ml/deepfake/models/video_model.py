@@ -60,14 +60,6 @@ class DeepfakeVideoModel(nn.Module):
                 ckpt_state = ckpt
             print(f"[*] Loaded spatial checkpoint ({spatial_backbone}) from: {spatial_checkpoint}")
 
-        if spatial_feature_dim is None:
-            spatial_feature_dim = 2048 if "b5" in spatial_backbone else 1408
-
-        self.spatial_feature_dim = spatial_feature_dim
-        self.spatial_backbone = spatial_backbone
-        self.hidden_dim = hidden_dim
-        self.freeze_spatial = freeze_spatial
-
         # 1. Spatial Backbone (EfficientNet-B5 or B2)
         self.spatial_cnn = build_model(
             model_name=spatial_backbone,
@@ -78,6 +70,17 @@ class DeepfakeVideoModel(nn.Module):
         if ckpt_state is not None:
             self.spatial_cnn.load_state_dict(ckpt_state, strict=False)
 
+        # Dynamically determine exact feature dimension from backbone
+        if hasattr(self.spatial_cnn.backbone, "num_features"):
+            spatial_feature_dim = self.spatial_cnn.backbone.num_features
+        elif spatial_feature_dim is None:
+            spatial_feature_dim = 2048 if "b5" in spatial_backbone else 1408
+
+        self.spatial_feature_dim = spatial_feature_dim
+        self.spatial_backbone = spatial_backbone
+        self.hidden_dim = hidden_dim
+        self.freeze_spatial = freeze_spatial
+
         # Replace classification head on backbone to extract clean pooling features
         self.spatial_cnn.backbone.reset_classifier(0)
 
@@ -86,7 +89,7 @@ class DeepfakeVideoModel(nn.Module):
 
         # 2. Temporal Sequence Modeling (Bi-LSTM)
         self.lstm = nn.LSTM(
-            input_size=spatial_feature_dim,
+            input_size=self.spatial_feature_dim,
             hidden_size=hidden_dim,
             num_layers=num_lstm_layers,
             batch_first=True,

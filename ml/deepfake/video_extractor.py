@@ -36,7 +36,8 @@ class VideoFaceExtractor:
         """Loads Haar cascades with multi-path resolution."""
         base_dir = Path(__file__).resolve().parent
         bundled_dir = base_dir / "models" / "haarcascades"
-        sys_dir = Path(getattr(cv2, "data", Path())).resolve() / "haarcascades" if hasattr(cv2, "data") else Path()
+        sys_haarcascades = getattr(cv2.data, "haarcascades", "") if hasattr(cv2, "data") else ""
+        sys_dir = Path(sys_haarcascades) if sys_haarcascades else bundled_dir
 
         frontal_candidates = [
             bundled_dir / "haarcascade_frontalface_default.xml",
