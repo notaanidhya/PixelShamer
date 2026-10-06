@@ -15,6 +15,7 @@ from backend.app.routers import analysis
 from backend.app.routers import deepfake as deepfake_router
 from backend.app.services.inference import inference_service
 from backend.app.services.deepfake_inference import deepfake_service
+from backend.app.services.deepfake_video_inference import video_deepfake_service
 from backend.app.schemas.schemas import HealthResponse
 
 logging.basicConfig(
@@ -31,6 +32,7 @@ os.makedirs(os.path.join(UPLOAD_DIR, "images"), exist_ok=True)
 os.makedirs(os.path.join(UPLOAD_DIR, "heatmaps"), exist_ok=True)
 os.makedirs(os.path.join(UPLOAD_DIR, "deepfake", "images"), exist_ok=True)
 os.makedirs(os.path.join(UPLOAD_DIR, "deepfake", "heatmaps"), exist_ok=True)
+os.makedirs(os.path.join(UPLOAD_DIR, "deepfake", "videos"), exist_ok=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -66,6 +68,12 @@ async def lifespan(app: FastAPI):
         logger.info("Deepfake Detection models loaded successfully.")
     except Exception as e:
         logger.error(f"Failed to load deepfake models during startup: {e}", exc_info=True)
+
+    try:
+        video_deepfake_service.load_models()
+        logger.info("Video Deepfake Detection models loaded successfully.")
+    except Exception as e:
+        logger.error(f"Failed to load video deepfake models during startup: {e}", exc_info=True)
 
     yield
     
@@ -120,13 +128,15 @@ async def health_check():
     """Health check endpoint exposing service readiness and model loading status for both pipelines."""
     return HealthResponse(
         status="ok",
-        version="1.1.0",
+        version="1.2.0",
         models_loaded=inference_service.is_ready,
         deepfake_models_loaded=deepfake_service.is_ready,
         details={
             "environment": os.getenv("APP_ENV", "development"),
             "quality_device": str(inference_service.device),
-            "deepfake_device": str(deepfake_service.device)
+            "deepfake_device": str(deepfake_service.device),
+            "video_deepfake_models_loaded": video_deepfake_service.is_ready,
+            "video_deepfake_device": str(video_deepfake_service.device)
         }
     )
 
