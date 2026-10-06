@@ -23,11 +23,21 @@ Write-Host "[*] Using Spatial Checkpoint: $SPATIAL_CKPT" -ForegroundColor Yellow
 
 # 3. Check for video manifest
 $MANIFEST = "data\deepfake\video_manifest.csv"
-if (-not (Test-Path $MANIFEST)) {
-    Write-Host "[*] No video manifest found at $MANIFEST. Running verification sequence mode..." -ForegroundColor Yellow
+$hasVideos = $false
+
+if (Test-Path $MANIFEST) {
+    $lines = Get-Content $MANIFEST -ErrorAction SilentlyContinue
+    if ($lines -and $lines.Count -gt 1) {
+        $hasVideos = $true
+    }
+}
+
+if (-not $hasVideos) {
+    Write-Host "[*] No videos registered in $MANIFEST." -ForegroundColor Yellow
+    Write-Host "[*] Running GPU verification test suite (validating CUDA, FP16, and temporal Bi-LSTM)..." -ForegroundColor Yellow
     & $PYTHON ml\deepfake\train_video.py --spatial_checkpoint $SPATIAL_CKPT --epochs 10 --batch_size 16 --num_frames 16 --amp
 } else {
-    Write-Host "[*] Training on Video Manifest: $MANIFEST" -ForegroundColor Green
+    Write-Host "[*] Training on Video Manifest: $MANIFEST ($($lines.Count - 1) video clips)" -ForegroundColor Green
     & $PYTHON ml\deepfake\train_video.py `
         --spatial_checkpoint $SPATIAL_CKPT `
         --manifest_train $MANIFEST `

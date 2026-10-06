@@ -203,9 +203,27 @@ def train_video_model(
         test_ds = CachedFeatureDataset(feats[n_train+n_val:], labels[n_train+n_val:], names[n_train+n_val:])
         is_pre_extracted = True
     elif manifest_train and os.path.exists(manifest_train):
-        train_ds = VideoForensicsDataset(manifest_train, num_frames=num_frames, is_training=True)
-        val_ds = VideoForensicsDataset(manifest_val or manifest_train, num_frames=num_frames, is_training=False)
-        test_ds = VideoForensicsDataset(manifest_test or manifest_train, num_frames=num_frames, is_training=False)
+        manifest_valid = False
+        try:
+            m_df = pd.read_csv(manifest_train)
+            if len(m_df) > 0:
+                manifest_valid = True
+                train_ds = VideoForensicsDataset(manifest_train, num_frames=num_frames, is_training=True)
+                val_ds = VideoForensicsDataset(manifest_val or manifest_train, num_frames=num_frames, is_training=False)
+                test_ds = VideoForensicsDataset(manifest_test or manifest_train, num_frames=num_frames, is_training=False)
+            else:
+                print(f"[!] Video manifest at {manifest_train} contains 0 videos.")
+        except Exception as e:
+            print(f"[!] Could not read manifest at {manifest_train}: {e}")
+
+        if not manifest_valid:
+            print("[*] Falling back to GPU verification test suite...")
+            fake_features = torch.randn(80, num_frames, 2048)
+            fake_labels = torch.randint(0, 2, (80, 1)).float()
+            train_ds = CachedFeatureDataset(fake_features[:60], fake_labels[:60])
+            val_ds = CachedFeatureDataset(fake_features[60:70], fake_labels[60:70])
+            test_ds = CachedFeatureDataset(fake_features[70:], fake_labels[70:])
+            is_pre_extracted = True
     else:
         # Generate synthetic sequence fixtures for smoke testing
         print("[*] No video dataset specified. Initializing test verification sequence suite...")

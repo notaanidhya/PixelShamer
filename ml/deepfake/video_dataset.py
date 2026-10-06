@@ -181,7 +181,13 @@ def build_video_manifest(source_dir: str | Path, output_csv: str | Path) -> pd.D
                     "label_name": "fake"
                 })
 
-    df = pd.DataFrame(records)
+    if not records:
+        print(f"[!] NOTICE: No video files (.mp4/.avi/.mov) found in: {source_path}")
+        print("    Please place video files into subfolders like: data/video_clips/real and data/video_clips/fake")
+        df = pd.DataFrame(columns=["filepath", "filename", "label", "label_name"])
+    else:
+        df = pd.DataFrame(records)
+
     df.to_csv(output_path, index=False)
     print(f"[OK] Created video manifest at {output_path} ({len(df)} videos found)")
     return df
