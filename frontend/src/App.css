@@ -1254,3 +1254,159 @@
   align-items: center;
   gap: 0.5rem;
 }
+
+/* ==========================================================================
+   Video Deepfake & Timeline Forensics
+   ========================================================================== */
+.dropzone-dual-icons {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.drop-icon-separator {
+  font-size: 0.85rem;
+  font-weight: 700;
+  user-select: none;
+}
+
+.timeline-section {
+  padding: 0.85rem 1rem;
+  background: var(--bg-well);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.timeline-playback-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.timeline-playpause-btn {
+  background: var(--panel-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.timeline-playpause-btn:hover {
+  border-color: var(--border-focus);
+  color: var(--text-highlight);
+}
+
+.timeline-seek-track {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.timeline-seek-fill {
+  height: 100%;
+  background: var(--text-highlight);
+  border-radius: 3px;
+  transition: width 0.1s linear;
+}
+
+.timeline-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  padding: 0 0.2rem;
+}
+
+.timeline-bars-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.35rem;
+  height: 78px;
+  padding: 0.35rem 0.2rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.timeline-bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  cursor: pointer;
+  position: relative;
+}
+
+.timeline-peak-marker {
+  position: absolute;
+  top: -2px;
+}
+
+.timeline-bar {
+  width: 100%;
+  border-radius: 2px 2px 0 0;
+  transition: all 0.15s ease;
+}
+
+.timeline-bar-col:hover .timeline-bar {
+  opacity: 1 !important;
+  transform: scaleY(1.05);
+}
+
+.timeline-bar-col.selected .timeline-bar {
+  opacity: 1 !important;
+  outline: 2px solid var(--text-highlight);
+}
+
+.timeline-bar-label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-top: 0.2rem;
+}
+
+.timeline-bar-col.selected .timeline-bar-label {
+  color: var(--text-highlight);
+  font-weight: 700;
+}
+
+.timeline-frame-detail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--panel-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.timeline-heatmap-btn {
+  background: var(--panel-surface-elevated);
+  border: 1px solid var(--border-focus);
+  color: var(--text-highlight);
+  padding: 0.2rem 0.5rem;
+  font-size: 0.68rem;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.timeline-heatmap-btn:hover {
+  background: var(--status-acceptable-bg);
+}
+

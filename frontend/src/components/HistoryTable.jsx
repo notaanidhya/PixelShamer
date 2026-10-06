@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { Search, Trash2, Eye, RefreshCw, ChevronLeft, ChevronRight, AlertCircle, User, Globe, ShieldCheck, Activity } from "lucide-react";
-import { getResults, deleteResult, getDeepfakeResults, deleteDeepfakeResult, getAssetUrl, formatLocalTimestamp } from "../api/client";
+import { Search, Trash2, Eye, RefreshCw, ChevronLeft, ChevronRight, AlertCircle, User, Globe, ShieldCheck, Activity, Film } from "lucide-react";
+import { getResults, deleteResult, getDeepfakeResults, deleteDeepfakeResult, getVideoDeepfakeResults, deleteVideoDeepfakeResult, getAssetUrl, formatLocalTimestamp } from "../api/client";
 import DetailModal from "./DetailModal";
 
 const QUALITY_FILTER_TABS = ["ALL", "ACCEPTABLE", "DEGRADED", "DEFECTIVE"];
 const DEEPFAKE_FILTER_TABS = ["ALL", "AUTHENTIC", "SUSPICIOUS", "LIKELY_FAKE"];
+const VIDEO_FILTER_TABS = ["ALL", "AUTHENTIC", "SUSPICIOUS", "LIKELY_FAKE"];
 
 export default function HistoryTable({ activePipeline = "quality", onPipelineChange }) {
   const [items, setItems] = useState([]);
@@ -19,13 +20,18 @@ export default function HistoryTable({ activePipeline = "quality", onPipelineCha
   const [selectedItem, setSelectedItem] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
-  const filterTabs = activePipeline === "deepfake" ? DEEPFAKE_FILTER_TABS : QUALITY_FILTER_TABS;
+  const filterTabs =
+    activePipeline === "video_deepfake" ? VIDEO_FILTER_TABS
+    : activePipeline === "deepfake" ? DEEPFAKE_FILTER_TABS
+    : QUALITY_FILTER_TABS;
 
   const fetchHistory = async () => {
     setIsLoading(true);
     try {
       let data;
-      if (activePipeline === "deepfake") {
+      if (activePipeline === "video_deepfake") {
+        data = await getVideoDeepfakeResults(page, limit, filterLabel, scope);
+      } else if (activePipeline === "deepfake") {
         data = await getDeepfakeResults(page, limit, filterLabel, scope);
       } else {
         data = await getResults(page, limit, filterLabel, scope);
@@ -54,7 +60,9 @@ export default function HistoryTable({ activePipeline = "quality", onPipelineCha
     if (!window.confirm(`Delete analysis record #${id}?`)) return;
     try {
       setDeletingId(id);
-      if (activePipeline === "deepfake") {
+      if (activePipeline === "video_deepfake") {
+        await deleteVideoDeepfakeResult(id);
+      } else if (activePipeline === "deepfake") {
         await deleteDeepfakeResult(id);
       } else {
         await deleteResult(id);
@@ -96,7 +104,15 @@ export default function HistoryTable({ activePipeline = "quality", onPipelineCha
                   onClick={() => onPipelineChange("deepfake")}
                 >
                   <ShieldCheck size={12} />
-                  <span>Deepfake</span>
+                  <span>Image Deepfake</span>
+                </button>
+                <button
+                  type="button"
+                  className={`pipeline-btn ${activePipeline === "video_deepfake" ? "active" : ""}`}
+                  onClick={() => onPipelineChange("video_deepfake")}
+                >
+                  <Film size={12} />
+                  <span>Video Forensics</span>
                 </button>
               </div>
             )}
@@ -172,9 +188,21 @@ export default function HistoryTable({ activePipeline = "quality", onPipelineCha
               <tr>
                 <th style={{ width: "70px" }}>Preview</th>
                 <th>Record ID & Filename</th>
-                <th>{activePipeline === "deepfake" ? "Fake Confidence" : "Score"}</th>
+                <th>
+                  {activePipeline === "video_deepfake"
+                    ? "Forgery Score"
+                    : activePipeline === "deepfake"
+                    ? "Fake Confidence"
+                    : "Score"}
+                </th>
                 <th>Classification</th>
-                <th>{activePipeline === "deepfake" ? "Face Status" : "Detected Issues"}</th>
+                <th>
+                  {activePipeline === "video_deepfake"
+                    ? "Duration / Frames"
+                    : activePipeline === "deepfake"
+                    ? "Face Status"
+                    : "Detected Issues"}
+                </th>
                 <th>Timestamp</th>
                 <th style={{ textAlign: "right" }}>Actions</th>
               </tr>
@@ -199,12 +227,22 @@ export default function HistoryTable({ activePipeline = "quality", onPipelineCha
                   <tr key={row.id} onClick={() => setSelectedItem(row)} className="clickable-row">
                     <td>
                       <div className="table-thumb-box">
-                        <img
-                          src={getAssetUrl(row.image_url)}
-                          alt={row.filename}
-                          className="table-thumb"
-                          loading="lazy"
-                        />
+                        {activePipeline === "video_deepfake" ? (
+                          <div style={{
+                            width: "56px", height: "40px", display: "flex",
+                            alignItems: "center", justifyContent: "center",
+                            background: "rgba(255,255,255,0.04)", borderRadius: "4px"
+                          }}>
+                            <Film size={20} className="text-highlight" />
+                          </div>
+                        ) : (
+                          <img
+                            src={getAssetUrl(row.image_url)}
+                            alt={row.filename}
+                            className="table-thumb"
+                            loading="lazy"
+                          />
+                        )}
                       </div>
                     </td>
                     <td>
@@ -215,13 +253,13 @@ export default function HistoryTable({ activePipeline = "quality", onPipelineCha
                     </td>
                     <td>
                       <span className="table-score-val text-highlight">
-                        {activePipeline === "deepfake"
+                        {(activePipeline === "deepfake" || activePipeline === "video_deepfake")
                           ? `${(row.fake_confidence * 100).toFixed(1)}%`
                           : (row.quality_score?.toFixed(1) ?? "—")}
                       </span>
                     </td>
                     <td>
-                      {activePipeline === "deepfake" ? (
+                      {(activePipeline === "deepfake" || activePipeline === "video_deepfake") ? (
                         <span className={`status-tag ${row.verdict?.toLowerCase()}`}>
                           {row.verdict}
                         </span>
@@ -232,7 +270,11 @@ export default function HistoryTable({ activePipeline = "quality", onPipelineCha
                       )}
                     </td>
                     <td>
-                      {activePipeline === "deepfake" ? (
+                      {activePipeline === "video_deepfake" ? (
+                        <span className="text-highlight">
+                          {row.duration_seconds?.toFixed(1)}s / {row.total_frames_analyzed} frames
+                        </span>
+                      ) : activePipeline === "deepfake" ? (
                         <span className={row.face_detected ? "text-emerald-400" : "text-muted"}>
                           {row.face_detected ? "Localized" : "Not Found"}
                         </span>

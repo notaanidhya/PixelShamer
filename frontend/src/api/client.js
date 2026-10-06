@@ -14,7 +14,13 @@ const API_BASE_URL = getBaseUrl();
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 45000,
+  timeout: 120000, // 2 min for large video uploads
+});
+
+// Separate client with longer timeout for video uploads
+const videoApiClient = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 300000, // 5 min for video upload + inference
 });
 
 export const getSessionId = () => {
@@ -29,6 +35,11 @@ export const getSessionId = () => {
 
 // Automatically attach session header for client isolation
 apiClient.interceptors.request.use((config) => {
+  config.headers["X-Session-ID"] = getSessionId();
+  return config;
+});
+
+videoApiClient.interceptors.request.use((config) => {
   config.headers["X-Session-ID"] = getSessionId();
   return config;
 });
@@ -151,6 +162,67 @@ export const getDeepfakeResultById = async (id) => {
 
 export const deleteDeepfakeResult = async (id) => {
   await apiClient.delete(`/api/deepfake/results/${id}`);
+  return true;
+};
+
+// --- Video Deepfake Detection API Client Methods ---
+
+export const VIDEO_EXTENSIONS = ["mp4", "avi", "mov", "mkv", "webm"];
+export const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "bmp"];
+
+export const getFileMediaType = (file) => {
+  const ext = file.name.split(".").pop().toLowerCase();
+  if (VIDEO_EXTENSIONS.includes(ext)) return "video";
+  return "image";
+};
+
+export const analyzeVideoDeepfake = async (file, onUploadProgress = null) => {
+  const formData = new FormData();
+  formData.append("video", file);
+
+  const sid = getSessionId();
+  const response = await videoApiClient.post(
+    `/api/deepfake/analyze-video?session_id=${encodeURIComponent(sid)}`,
+    formData,
+    {
+      headers: {
+        "Content-Type": "multipart/form-data",
+        "X-Session-ID": sid,
+      },
+      onUploadProgress: onUploadProgress
+        ? (evt) => {
+            if (evt.total) {
+              const pct = Math.round((evt.loaded / evt.total) * 100);
+              onUploadProgress(pct);
+            }
+          }
+        : undefined,
+    }
+  );
+  return response.data;
+};
+
+export const getVideoDeepfakeResults = async (page = 1, limit = 10, verdict = null, scope = "session") => {
+  const params = {
+    page,
+    limit,
+    scope,
+    session_id: getSessionId(),
+  };
+  if (verdict && verdict !== "ALL") {
+    params.verdict = verdict;
+  }
+  const response = await apiClient.get("/api/deepfake/history/videos", { params });
+  return response.data;
+};
+
+export const getVideoDeepfakeResultById = async (id) => {
+  const response = await apiClient.get(`/api/deepfake/videos/${id}`);
+  return response.data;
+};
+
+export const deleteVideoDeepfakeResult = async (id) => {
+  await apiClient.delete(`/api/deepfake/videos/${id}`);
   return true;
 };
 

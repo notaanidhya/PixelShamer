@@ -2,12 +2,20 @@ import React, { useState, useEffect } from "react";
 import Header from "./components/Header";
 import UploadZone from "./components/UploadZone";
 import ImageViewer from "./components/ImageViewer";
+import VideoTimelineViewer from "./components/VideoTimelineViewer";
 import DiagnosticsPanel from "./components/DiagnosticsPanel";
 import DeepfakePanel from "./components/DeepfakePanel";
+import VideoDeepfakePanel from "./components/VideoDeepfakePanel";
 import MetricsMatrix from "./components/MetricsMatrix";
 import HistoryTable from "./components/HistoryTable";
 import WalkthroughTour from "./components/WalkthroughTour";
-import { analyzeImage, analyzeDeepfake, getPresetAnalysis } from "./api/client";
+import {
+  analyzeImage,
+  analyzeDeepfake,
+  analyzeVideoDeepfake,
+  getPresetAnalysis,
+  getFileMediaType,
+} from "./api/client";
 import { AlertCircle, X } from "lucide-react";
 import "./App.css";
 
@@ -19,6 +27,8 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
   const [isTourOpen, setIsTourOpen] = useState(false);
+  const [mediaType, setMediaType] = useState("image"); // "image" | "video"
+  const [uploadProgress, setUploadProgress] = useState(null);
 
   // Auto-launch walkthrough for first-time visitors
   useEffect(() => {
@@ -39,41 +49,61 @@ export default function App() {
     setActiveResult(null);
     setPreviewUrl(null);
     setErrorMsg(null);
+    setMediaType("image");
+    setUploadProgress(null);
   };
 
   const handleFileSelected = async (file) => {
     if (!file) return;
     setErrorMsg(null);
-    setActiveResult(null); // Immediately purge previous image analysis result
+    setActiveResult(null);
+    setUploadProgress(null);
 
-    // Create local preview immediately
+    // Detect media type
+    const detectedType = getFileMediaType(file);
+    setMediaType(detectedType);
+
+    // For video: create a local object URL so the video player shows immediately
     const localUrl = URL.createObjectURL(file);
     setPreviewUrl(localUrl);
     setIsAnalyzing(true);
 
     try {
       let data;
-      if (activePipeline === "deepfake") {
+
+      if (detectedType === "video") {
+        // Video deepfake analysis (only makes sense in deepfake pipeline)
+        if (activePipeline !== "deepfake") {
+          throw new Error("Video files can only be analyzed in the Deepfake Detection pipeline. Switch the pipeline in the header.");
+        }
+        data = await analyzeVideoDeepfake(file, (pct) => setUploadProgress(pct));
+      } else if (activePipeline === "deepfake") {
+        // Image deepfake analysis
         data = await analyzeDeepfake(file);
       } else {
+        // Image quality analysis
         data = await analyzeImage(file);
       }
+
       setActiveResult(data);
     } catch (err) {
       console.error("Analysis failed:", err);
-      const detail = err.response?.data?.detail || err.message || "Failed to analyze image.";
+      const detail = err.response?.data?.detail || err.message || "Failed to analyze file.";
       setErrorMsg(detail);
     } finally {
       setIsAnalyzing(false);
+      setUploadProgress(null);
     }
   };
 
   const handlePresetSelected = async (preset) => {
     if (!preset) return;
     setErrorMsg(null);
-    setActiveResult(null); // Immediately purge previous image analysis result
+    setActiveResult(null);
     setPreviewUrl(preset.file);
+    setMediaType("image"); // All presets are images
     setIsAnalyzing(true);
+    setUploadProgress(null);
 
     try {
       if (activePipeline === "deepfake") {
@@ -121,6 +151,12 @@ export default function App() {
     handlePresetSelected(targetPreset);
   };
 
+  // Determine which viewer and panel to show
+  const isVideoResult = mediaType === "video";
+  const showVideoPanel = activePipeline === "deepfake" && isVideoResult;
+  const showImageDeepfakePanel = activePipeline === "deepfake" && !isVideoResult;
+  const showQualityPanel = activePipeline === "quality";
+
   return (
     <div className="app-container">
       {/* Header with Navigation and Live Health Status */}
@@ -149,7 +185,7 @@ export default function App() {
         {/* View Switcher */}
         {activeTab === "workspace" ? (
           <div className="workspace-view">
-            {/* Upload Zone & Benchmark Sample Loaders */}
+            {/* Upload Zone — accepts images and (in deepfake mode) videos */}
             <UploadZone
               onFileSelected={handleFileSelected}
               onPresetSelected={handlePresetSelected}
@@ -159,14 +195,29 @@ export default function App() {
 
             {/* Split Screen Dual Workspace */}
             <div className="grid-2col workspace-grid">
-              {/* Left Column: Spatial Viewport & Heatmap Comparator */}
+              {/* Left Column: Spatial Viewport or Video Player */}
               <div className="workspace-col-left">
-                <ImageViewer result={activeResult} previewUrl={previewUrl} isAnalyzing={isAnalyzing} />
+                {showVideoPanel ? (
+                  <VideoTimelineViewer
+                    result={activeResult}
+                    previewUrl={previewUrl}
+                    isAnalyzing={isAnalyzing}
+                    uploadProgress={uploadProgress}
+                  />
+                ) : (
+                  <ImageViewer
+                    result={activeResult}
+                    previewUrl={previewUrl}
+                    isAnalyzing={isAnalyzing}
+                  />
+                )}
               </div>
 
-              {/* Right Column: Real-time Telemetry & Issues Stream */}
+              {/* Right Column: Telemetry Panel */}
               <div className="workspace-col-right">
-                {activePipeline === "deepfake" ? (
+                {showVideoPanel ? (
+                  <VideoDeepfakePanel result={activeResult} isAnalyzing={isAnalyzing} />
+                ) : showImageDeepfakePanel ? (
                   <DeepfakePanel result={activeResult} isAnalyzing={isAnalyzing} />
                 ) : (
                   <DiagnosticsPanel result={activeResult} isAnalyzing={isAnalyzing} />
@@ -174,8 +225,8 @@ export default function App() {
               </div>
             </div>
 
-            {/* Bottom: Extracted Telemetry Matrix (Quality & Deepfake Modes) */}
-            {activeResult && activeResult.statistics && (
+            {/* Bottom: Metrics Matrix (image results only — video has its own timeline) */}
+            {!isVideoResult && activeResult && activeResult.statistics && (
               <div className="metrics-matrix-wrapper">
                 <MetricsMatrix
                   statistics={activeResult.statistics}
