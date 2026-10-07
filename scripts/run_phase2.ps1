@@ -35,15 +35,18 @@ if (Test-Path $MANIFEST) {
 if (-not $hasVideos) {
     Write-Host "[*] No videos registered in $MANIFEST." -ForegroundColor Yellow
     Write-Host "[*] Running GPU verification test suite (validating CUDA, FP16, and temporal Bi-LSTM)..." -ForegroundColor Yellow
-    & $PYTHON ml\deepfake\train_video.py --spatial_checkpoint $SPATIAL_CKPT --epochs 10 --batch_size 16 --num_frames 16 --amp
+    & $PYTHON ml\deepfake\train_video.py --spatial_checkpoint $SPATIAL_CKPT --epochs 10 --batch_size 32 --num_frames 16 --amp --precache
 } else {
     Write-Host "[*] Training on Video Manifest: $MANIFEST ($($lines.Count - 1) video clips)" -ForegroundColor Green
+    Write-Host "[*] Leveraging 64GB RAM & GPU via In-Memory Pre-Caching and Multi-Core Workers" -ForegroundColor Cyan
     & $PYTHON ml\deepfake\train_video.py `
         --spatial_checkpoint $SPATIAL_CKPT `
         --manifest_train $MANIFEST `
         --epochs 15 `
-        --batch_size 16 `
+        --batch_size 32 `
         --num_frames 16 `
+        --num_workers 4 `
+        --precache `
         --amp
 }
 

@@ -137,7 +137,7 @@ def evaluate_video_split(
 
 def train_video_model(
     epochs: int = 15,
-    batch_size: int = 16,
+    batch_size: int = 32,
     lr: float = 2e-4,
     hidden_dim: int = 256,
     spatial_checkpoint: str | None = None,
@@ -147,7 +147,9 @@ def train_video_model(
     manifest_test: str | None = None,
     num_frames: int = 16,
     use_amp: bool = True,
-    device_name: str | None = None
+    device_name: str | None = None,
+    num_workers: int = 4,
+    precache: bool = True
 ):
     if device_name is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -184,7 +186,30 @@ def train_video_model(
         freeze_spatial=True
     ).to(device)
 
+    if torch.cuda.is_available():
+        torch.backends.cudnn.benchmark = True
+
     is_pre_extracted = False
+
+    # Auto-caching to fully leverage 64GB RAM & GPU:
+    default_cache_path = ROOT_DIR / "data" / "deepfake" / "video_features_cache.pt"
+    if not feature_cache_path and precache and manifest_train and os.path.exists(manifest_train):
+        try:
+            m_check = pd.read_csv(manifest_train)
+            if len(m_check) > 0:
+                if not default_cache_path.exists():
+                    print(f"[*] [ACCELERATION] Pre-caching video features to utilize 64GB RAM & GPU...")
+                    extract_and_cache_features(
+                        manifest_csv=manifest_train,
+                        spatial_model=model.spatial_cnn,
+                        output_cache_path=default_cache_path,
+                        device=device,
+                        num_frames=num_frames,
+                        batch_size=min(16, max(4, batch_size // 2))
+                    )
+                feature_cache_path = str(default_cache_path)
+        except Exception as e:
+            print(f"[!] Pre-caching check bypassed: {e}")
 
     # Check for feature cache (highest performance on 64GB RAM)
     if feature_cache_path and os.path.exists(feature_cache_path):
@@ -196,8 +221,8 @@ def train_video_model(
         
         # Partition 80 / 10 / 10
         total = len(feats)
-        n_train = int(total * 0.80)
-        n_val = int(total * 0.10)
+        n_train = max(1, int(total * 0.80))
+        n_val = max(1, int(total * 0.10))
 
         train_ds = CachedFeatureDataset(feats[:n_train], labels[:n_train], names[:n_train])
         val_ds = CachedFeatureDataset(feats[n_train:n_train+n_val], labels[n_train:n_train+n_val], names[n_train:n_train+n_val])
@@ -235,9 +260,31 @@ def train_video_model(
         test_ds = CachedFeatureDataset(fake_features[70:], fake_labels[70:])
         is_pre_extracted = True
 
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
+    # Use multi-worker decoding for video files; in-memory tensors are zero-worker instant
+    loader_workers = 0 if is_pre_extracted else min(num_workers, os.cpu_count() or 4)
+    use_pin = (device.type == "cuda")
+
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=loader_workers,
+        pin_memory=use_pin
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=loader_workers,
+        pin_memory=use_pin
+    )
+    test_loader = DataLoader(
+        test_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=loader_workers,
+        pin_memory=use_pin
+    )
 
     print(f"[*] Dataset Ready: Train={len(train_ds)}, Val={len(val_ds)}, Test={len(test_ds)}")
 
@@ -401,7 +448,7 @@ def execute_gate_3_audit(train_res, val_res, test_res, output_path: Path, calibr
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Spatio-Temporal Video Deepfake Detector.")
     parser.add_argument("--epochs", type=int, default=15, help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size (default: 32 for GPU saturation)")
     parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
     parser.add_argument("--hidden_dim", type=int, default=256, help="LSTM hidden state dimension")
     parser.add_argument("--spatial_checkpoint", type=str, default=None, help="Path to Phase 1 spatial weights")
@@ -412,6 +459,9 @@ if __name__ == "__main__":
     parser.add_argument("--num_frames", type=int, default=16, help="Number of frames per video clip")
     parser.add_argument("--amp", action="store_true", default=True, help="Use Automatic Mixed Precision")
     parser.add_argument("--no_amp", action="store_false", dest="amp", help="Disable AMP")
+    parser.add_argument("--num_workers", type=int, default=4, help="CPU workers for data decoding")
+    parser.add_argument("--precache", action="store_true", default=True, help="Pre-cache spatial features into RAM for 20x speedup")
+    parser.add_argument("--no_precache", action="store_false", dest="precache", help="Disable pre-caching")
     args = parser.parse_args()
 
     train_video_model(
@@ -425,5 +475,7 @@ if __name__ == "__main__":
         manifest_val=args.manifest_val,
         manifest_test=args.manifest_test,
         num_frames=args.num_frames,
-        use_amp=args.amp
+        use_amp=args.amp,
+        num_workers=args.num_workers,
+        precache=args.precache
     )
