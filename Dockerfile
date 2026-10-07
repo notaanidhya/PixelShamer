@@ -12,11 +12,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies for OpenCV and image operations
+# Install system dependencies for OpenCV, FFmpeg, and video operations
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     libgomp1 \
+    ffmpeg \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -35,7 +36,7 @@ COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
 # Set permissions for Hugging Face Spaces (runs as non-root user 1000)
 RUN useradd -m -u 1000 user
-RUN mkdir -p /app/backend/uploads/images /app/backend/uploads/heatmaps && \
+RUN mkdir -p /app/backend/uploads/images /app/backend/uploads/heatmaps /app/backend/uploads/videos && \
     chown -R user:user /app
 USER user
 

@@ -1,8 +1,46 @@
 import React from "react";
-import { ShieldCheck, AlertTriangle, AlertOctagon, Film, Clock, Cpu, Zap, Eye } from "lucide-react";
+import { ShieldCheck, AlertTriangle, AlertOctagon, Film, Clock, Cpu, Zap, Eye, Download } from "lucide-react";
 import { formatLocalTimestamp } from "../api/client";
 
 export default function VideoDeepfakePanel({ result, isAnalyzing }) {
+  const handleExportReport = () => {
+    if (!result) return;
+    const report = {
+      report_metadata: {
+        generated_at: new Date().toISOString(),
+        system: "PixelShamer Deepfake Video Forensics",
+        architecture: "Spatial EfficientNet-B5 Backbone + Bi-LSTM Temporal Sequence Classifier",
+        analysis_id: result.id,
+        session_id: result.session_id,
+        input_filename: result.filename
+      },
+      forensic_verdict: {
+        verdict: result.verdict,
+        fake_confidence: result.fake_confidence,
+        calibrated_threshold: result.calibrated_threshold || 0.45,
+        analysis_summary: result.analysis_summary
+      },
+      video_telemetry: {
+        duration_sec: result.duration_sec,
+        fps: result.fps,
+        total_video_frames: result.total_video_frames,
+        analyzed_frames_count: result.frames_analyzed,
+        peak_anomaly_timestamp_sec: result.peak_anomaly_timestamp,
+        peak_anomaly_confidence: result.peak_anomaly_confidence
+      },
+      temporal_frame_timeline: result.timeline || []
+    };
+
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `deepfake_forensics_${result.filename?.replace(/[^a-zA-Z0-9_-]/g, "_") || "report"}_${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
   if (isAnalyzing) {
     return (
       <div className="workbench-panel diagnostics-panel" id="tour-diagnostics">
@@ -89,17 +127,38 @@ export default function VideoDeepfakePanel({ result, isAnalyzing }) {
   return (
     <div className="workbench-panel diagnostics-panel" id="tour-diagnostics">
       {/* Panel Header */}
-      <div className="panel-header">
+      <div className="panel-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div className="panel-title">
           <Film size={15} />
           <span>Video Deepfake Forensics</span>
         </div>
-        <div
-          className="verdict-pill mono"
-          style={{ color: vInfo.color, backgroundColor: vInfo.bg, borderColor: vInfo.color }}
-        >
-          {vInfo.icon}
-          <span>{vInfo.label}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <button
+            onClick={handleExportReport}
+            className="btn btn-secondary mono"
+            style={{
+              padding: "4px 9px",
+              fontSize: "11px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "5px",
+              cursor: "pointer",
+              borderRadius: "4px",
+              border: "1px solid var(--border-color, #334155)",
+              background: "rgba(255, 255, 255, 0.05)"
+            }}
+            title="Download Forensic Audit Report (JSON)"
+          >
+            <Download size={13} className="text-highlight" />
+            <span>Export Report</span>
+          </button>
+          <div
+            className="verdict-pill mono"
+            style={{ color: vInfo.color, backgroundColor: vInfo.bg, borderColor: vInfo.color }}
+          >
+            {vInfo.icon}
+            <span>{vInfo.label}</span>
+          </div>
         </div>
       </div>
 
