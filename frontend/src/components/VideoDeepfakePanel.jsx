@@ -17,14 +17,14 @@ export default function VideoDeepfakePanel({ result, isAnalyzing }) {
       forensic_verdict: {
         verdict: result.verdict,
         fake_confidence: result.fake_confidence,
-        calibrated_threshold: result.calibrated_threshold || 0.45,
+        calibrated_threshold: result.threshold ?? result.calibrated_threshold ?? 0.45,
         analysis_summary: result.analysis_summary
       },
       video_telemetry: {
-        duration_sec: result.duration_sec,
-        fps: result.fps,
-        total_video_frames: result.total_video_frames,
-        analyzed_frames_count: result.frames_analyzed,
+        duration_sec: result.duration_seconds ?? result.duration_sec,
+        fps: result.fps || 25,
+        total_video_frames: result.total_video_frames || Math.round((result.duration_seconds || 0) * 25),
+        analyzed_frames_count: result.total_frames_analyzed ?? result.frames_analyzed ?? 16,
         peak_anomaly_timestamp_sec: result.peak_anomaly_timestamp,
         peak_anomaly_confidence: result.peak_anomaly_confidence
       },
