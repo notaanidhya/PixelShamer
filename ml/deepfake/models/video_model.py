@@ -148,6 +148,9 @@ class DeepfakeVideoModel(nn.Module):
         """
         if is_pre_extracted:
             features = x # (B, T, 2048)
+            if self.training:
+                noise = torch.randn_like(features) * 0.04
+                features = nn.functional.dropout(features + noise, p=0.20, training=True)
         else:
             b, t, c, h, w = x.shape
             # Flatten batch and sequence to run spatial CNN in parallel

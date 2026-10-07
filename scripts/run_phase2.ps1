@@ -42,7 +42,7 @@ if (-not $hasVideos) {
     & $PYTHON ml\deepfake\train_video.py `
         --spatial_checkpoint $SPATIAL_CKPT `
         --manifest_train $MANIFEST `
-        --epochs 25 `
+        --epochs 12 `
         --batch_size 16 `
         --num_frames 16 `
         --num_workers 0 `

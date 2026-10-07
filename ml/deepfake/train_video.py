@@ -312,7 +312,7 @@ def train_video_model(
     optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=lr,
-        weight_decay=1e-4
+        weight_decay=1e-3
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
 
