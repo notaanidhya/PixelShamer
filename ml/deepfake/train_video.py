@@ -33,8 +33,9 @@ from ml.deepfake.models.video_model import build_video_model, DeepfakeVideoModel
 from ml.deepfake.video_dataset import VideoForensicsDataset, CachedFeatureDataset, extract_and_cache_features
 
 def find_optimal_threshold(targets, probs):
-    """Finds decision threshold maximizing balanced accuracy."""
-    best_score, best_th = 0.0, 0.50
+    """Finds decision threshold maximizing balanced accuracy, centered near 0.50."""
+    best_score = 0.0
+    candidates = []
     for th in np.linspace(0.35, 0.75, 41):
         preds = (probs >= th).astype(int)
         real_mask = (targets == 0)
@@ -42,9 +43,13 @@ def find_optimal_threshold(targets, probs):
         real_acc = float(np.mean(preds[real_mask] == 0)) if np.sum(real_mask) > 0 else 0.0
         fake_acc = float(np.mean(preds[fake_mask] == 1)) if np.sum(fake_mask) > 0 else 0.0
         score = 0.50 * real_acc + 0.50 * fake_acc
+        candidates.append((score, float(th)))
         if score > best_score:
             best_score = score
-            best_th = float(th)
+
+    # Pick candidate with max score that is closest to 0.50 (prevents hypersensitive false positives)
+    top_candidates = [th for s, th in candidates if s >= best_score - 1e-4]
+    best_th = min(top_candidates, key=lambda th: abs(th - 0.50)) if top_candidates else 0.50
     return round(best_th, 3), round(best_score, 4)
 
 def compute_video_loss(
