@@ -81,8 +81,8 @@ class DeepfakeVideoModel(nn.Module):
         self.hidden_dim = hidden_dim
         self.freeze_spatial = freeze_spatial
 
-        # Replace classification head on backbone to extract clean pooling features
-        self.spatial_cnn.backbone.reset_classifier(0)
+        # Retain classification head so spatial CNN can generate genuine class logits for Grad-CAM explainability
+        # forward_head(..., pre_logits=True) extracts raw features without altering the classifier.
 
         if freeze_spatial:
             self.freeze_spatial_backbone()

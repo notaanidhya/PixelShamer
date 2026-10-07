@@ -13,6 +13,7 @@ from typing import Optional
 import cv2
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, Query, Header, status
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 from PIL import Image
 
 from backend.app.db.session import get_db
@@ -37,6 +38,25 @@ ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 MAX_FILE_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_MB", "15")) * 1024 * 1024
 MAX_VIDEO_FILE_SIZE_BYTES = int(os.getenv("MAX_VIDEO_UPLOAD_SIZE_MB", "100")) * 1024 * 1024
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "uploads"))
+
+def prune_old_uploads(target_dir: str, max_files: int = 50):
+    """Automatically prunes oldest video files if storage exceeds retention limit."""
+    try:
+        if not os.path.exists(target_dir):
+            return
+        files = [
+            os.path.join(target_dir, f) for f in os.listdir(target_dir)
+            if os.path.isfile(os.path.join(target_dir, f))
+        ]
+        if len(files) > max_files:
+            files.sort(key=os.path.getmtime)
+            for old_file in files[:len(files) - max_files]:
+                try:
+                    os.remove(old_file)
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.warning(f"Storage pruning bypassed: {e}")
 
 @router.post("/analyze", response_model=DeepfakeResponse, status_code=status.HTTP_201_CREATED)
 async def analyze_deepfake_endpoint(
@@ -85,9 +105,10 @@ async def analyze_deepfake_endpoint(
             detail="Corrupted or invalid image file. Header integrity check failed."
         )
 
-    # 4. Neural inference
+    # 4. Neural inference (offloaded to threadpool to avoid blocking asyncio event loop)
     try:
-        result = deepfake_service.analyze_image(
+        result = await run_in_threadpool(
+            deepfake_service.analyze_image,
             image_bytes=content,
             original_filename=filename,
             upload_dir=UPLOAD_DIR
@@ -293,9 +314,11 @@ async def analyze_video_deepfake_endpoint(
             detail="Video stream contains 0 decodable frames."
         )
 
-    # 5. Execute neural spatio-temporal video inference
+    # 5. Execute neural spatio-temporal video inference (offloaded to threadpool)
+    prune_old_uploads(videos_dir, max_files=50)
     try:
-        result = video_deepfake_service.analyze_video(
+        result = await run_in_threadpool(
+            video_deepfake_service.analyze_video,
             video_path=video_disk_path,
             original_filename=filename,
             upload_dir=UPLOAD_DIR

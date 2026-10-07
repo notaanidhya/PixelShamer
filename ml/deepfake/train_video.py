@@ -32,6 +32,63 @@ if str(ROOT_DIR) not in sys.path:
 from ml.deepfake.models.video_model import build_video_model, DeepfakeVideoModel
 from ml.deepfake.video_dataset import VideoForensicsDataset, CachedFeatureDataset, extract_and_cache_features
 
+def extract_subject_group(name: str) -> str:
+    """Extracts subject group key (e.g. 'id0' from 'id0_0001.mp4' or 'id0_id1_0000.mp4')."""
+    stem = Path(name).stem.lower()
+    if stem.startswith("id"):
+        return stem.split("_")[0]
+    parts = stem.split("_")
+    if parts and parts[0].isdigit():
+        return parts[0]
+    return stem
+
+def partition_dataset_indices(
+    names: list[str],
+    labels_arr: np.ndarray,
+    seed: int = 42
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Performs identity-aware group partition if multiple clips share subject IDs,
+    ensuring no subject appears in both train and test (anti-subject-leakage).
+    Falls back to stratified partition if groups are unique or degenerate.
+    """
+    indices = np.arange(len(labels_arr))
+    groups = [extract_subject_group(n) for n in names]
+    unique_groups = len(set(groups))
+
+    # Check if grouped splitting is viable (e.g. multiple samples per group)
+    if unique_groups < len(groups) * 0.90 and unique_groups >= 6:
+        try:
+            from sklearn.model_selection import GroupShuffleSplit
+            gss1 = GroupShuffleSplit(n_splits=1, test_size=0.20, random_state=seed)
+            train_idx, temp_idx = next(gss1.split(indices, labels_arr, groups))
+
+            temp_groups = [groups[i] for i in temp_idx]
+            gss2 = GroupShuffleSplit(n_splits=1, test_size=0.50, random_state=seed)
+            val_sub, test_sub = next(gss2.split(temp_idx, labels_arr[temp_idx], temp_groups))
+            val_idx = temp_idx[val_sub]
+            test_idx = temp_idx[test_sub]
+
+            # Verify that both classes exist in all 3 splits
+            tr_cls = len(np.unique(labels_arr[train_idx]))
+            va_cls = len(np.unique(labels_arr[val_idx]))
+            te_cls = len(np.unique(labels_arr[test_idx]))
+
+            if tr_cls == 2 and va_cls == 2 and te_cls == 2:
+                print(f"[*] [ANTI-LEAKAGE] Applied subject-isolated group partition ({unique_groups} unique subjects).")
+                return train_idx, val_idx, test_idx
+        except Exception:
+            pass
+
+    # Standard stratified 80 / 10 / 10 split
+    train_idx, temp_idx = train_test_split(
+        indices, test_size=0.20, stratify=labels_arr, random_state=seed
+    )
+    val_idx, test_idx = train_test_split(
+        temp_idx, test_size=0.50, stratify=labels_arr[temp_idx], random_state=seed
+    )
+    return train_idx, val_idx, test_idx
+
 def find_optimal_threshold(targets, probs):
     """Finds decision threshold maximizing balanced accuracy, centered near 0.50."""
     best_score = 0.0
@@ -236,28 +293,12 @@ def train_video_model(
         labels = torch.nan_to_num(cache["labels"].float(), nan=0.0)
         names = cache.get("names", [])
         
-        # Stratified 80 / 10 / 10 split with fixed seed for balanced Real/Fake distribution
-        indices = np.arange(len(feats))
+        # Identity-aware 80 / 10 / 10 split (anti-subject-leakage)
         labels_arr = labels.view(-1).cpu().numpy().astype(int)
+        names_list = names if names else [f"sample_{i}" for i in range(len(feats))]
+        train_idx, val_idx, test_idx = partition_dataset_indices(names_list, labels_arr, seed=42)
 
-        try:
-            train_idx, temp_idx = train_test_split(
-                indices, test_size=0.20, stratify=labels_arr, random_state=42
-            )
-            val_idx, test_idx = train_test_split(
-                temp_idx, test_size=0.50, stratify=labels_arr[temp_idx], random_state=42
-            )
-        except Exception:
-            np.random.seed(42)
-            perm = np.random.permutation(len(feats))
-            n_tr = max(1, int(len(feats) * 0.80))
-            n_va = max(1, int(len(feats) * 0.10))
-            train_idx = perm[:n_tr]
-            val_idx = perm[n_tr:n_tr+n_va]
-            test_idx = perm[n_tr+n_va:]
-
-        names_arr = np.array(names) if names else np.array([f"sample_{i}" for i in indices])
-
+        names_arr = np.array(names_list)
         train_ds = CachedFeatureDataset(feats[train_idx], labels[train_idx], names_arr[train_idx].tolist())
         val_ds = CachedFeatureDataset(feats[val_idx], labels[val_idx], names_arr[val_idx].tolist())
         test_ds = CachedFeatureDataset(feats[test_idx], labels[test_idx], names_arr[test_idx].tolist())
@@ -268,9 +309,18 @@ def train_video_model(
             m_df = pd.read_csv(manifest_train)
             if len(m_df) > 0:
                 manifest_valid = True
-                train_ds = VideoForensicsDataset(manifest_train, num_frames=num_frames, is_training=True)
-                val_ds = VideoForensicsDataset(manifest_val or manifest_train, num_frames=num_frames, is_training=False)
-                test_ds = VideoForensicsDataset(manifest_test or manifest_train, num_frames=num_frames, is_training=False)
+                if not manifest_val or not os.path.exists(manifest_val):
+                    print("[*] [ANTI-LEAKAGE] No separate val manifest given. Generating isolated 80/10/10 partitions...")
+                    m_names = m_df["filename"].tolist() if "filename" in m_df.columns else [f"v_{i}" for i in range(len(m_df))]
+                    m_labels = m_df["label"].values.astype(int)
+                    train_idx, val_idx, test_idx = partition_dataset_indices(m_names, m_labels, seed=42)
+                    train_ds = VideoForensicsDataset(m_df.iloc[train_idx], num_frames=num_frames, is_training=True)
+                    val_ds = VideoForensicsDataset(m_df.iloc[val_idx], num_frames=num_frames, is_training=False)
+                    test_ds = VideoForensicsDataset(m_df.iloc[test_idx], num_frames=num_frames, is_training=False)
+                else:
+                    train_ds = VideoForensicsDataset(manifest_train, num_frames=num_frames, is_training=True)
+                    val_ds = VideoForensicsDataset(manifest_val, num_frames=num_frames, is_training=False)
+                    test_ds = VideoForensicsDataset(manifest_test or manifest_val, num_frames=num_frames, is_training=False)
             else:
                 print(f"[!] Video manifest at {manifest_train} contains 0 videos.")
         except Exception as e:

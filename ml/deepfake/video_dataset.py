@@ -24,12 +24,15 @@ class VideoForensicsDataset(Dataset):
     """
     def __init__(
         self,
-        manifest_csv: str | Path,
+        manifest_csv: str | Path | pd.DataFrame,
         num_frames: int = 16,
         target_size: int = 288,
         is_training: bool = True
     ):
-        self.df = pd.read_csv(manifest_csv)
+        if isinstance(manifest_csv, pd.DataFrame):
+            self.df = manifest_csv.reset_index(drop=True)
+        else:
+            self.df = pd.read_csv(manifest_csv)
         self.num_frames = num_frames
         self.is_training = is_training
         self.extractor = VideoFaceExtractor(target_size=target_size, default_num_frames=num_frames)

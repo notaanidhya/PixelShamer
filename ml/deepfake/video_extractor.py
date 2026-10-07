@@ -116,8 +116,9 @@ class VideoFaceExtractor:
         self,
         video_path: str | Path,
         num_frames: int | None = None,
-        return_tensors: bool = True
-    ) -> tuple[torch.Tensor | np.ndarray | None, list[float]]:
+        return_tensors: bool = True,
+        return_both: bool = False
+    ):
         """
         Extracts uniformly sampled facial crops from a video.
         
@@ -126,9 +127,10 @@ class VideoFaceExtractor:
             num_frames: Number of evenly spaced frames to extract (default: 16).
             return_tensors: If True, returns torch.Tensor of shape (T, 3, target_size, target_size).
                            If False, returns np.ndarray of shape (T, target_size, target_size, 3) in BGR.
+            return_both: If True, returns (tensor_seq, face_crops_np, timestamps) in a single pass.
         
         Returns:
-            frames: Sequence of face crops (T, 3, H, W) or (T, H, W, 3).
+            frames: Sequence of face crops (T, 3, H, W) or (T, H, W, 3) or both if return_both=True.
             timestamps: List of frame timestamps in seconds.
         """
         video_path = str(video_path)
@@ -139,14 +141,14 @@ class VideoFaceExtractor:
         cap = cv2.VideoCapture(video_path)
 
         if not cap.isOpened():
-            return None, []
+            return (None, None, []) if return_both else (None, [])
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
 
         if total_frames <= 0:
             cap.release()
-            return None, []
+            return (None, None, []) if return_both else (None, [])
 
         # Uniform keyframe index selection
         if total_frames <= num_frames:
@@ -202,11 +204,11 @@ class VideoFaceExtractor:
             timestamps.append(timestamps[-1])
 
         if len(face_crops) == 0:
-            return None, []
+            return (None, None, []) if return_both else (None, [])
 
         face_crops_np = np.stack(face_crops, axis=0) # (T, H, W, 3) in BGR
 
-        if not return_tensors:
+        if not return_tensors and not return_both:
             return face_crops_np, timestamps
 
         # Convert to PyTorch Tensor: (T, 3, H, W) normalized
@@ -217,4 +219,6 @@ class VideoFaceExtractor:
             tensors.append(transformed)
 
         tensor_seq = torch.stack(tensors, dim=0) # (T, 3, H, W)
+        if return_both:
+            return tensor_seq, face_crops_np, timestamps
         return tensor_seq, timestamps

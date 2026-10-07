@@ -154,9 +154,9 @@ class DeepfakeInferenceService:
         detected_faces = sorted(detected_faces, key=lambda f: f[2] * f[3], reverse=True)
         x, y, fw, fh = detected_faces[0]
 
-        # Apply 1.20x margin with boundary clamping
-        margin_x = int(fw * 0.18)
-        margin_y = int(fh * 0.18)
+        # Apply 1.25x margin with boundary clamping (uniform with video keyframes)
+        margin_x = int(fw * 0.125)
+        margin_y = int(fh * 0.125)
         x1 = max(0, x - margin_x)
         y1 = max(0, y - margin_y)
         x2 = min(w, x + fw + margin_x)
@@ -168,12 +168,13 @@ class DeepfakeInferenceService:
 
     def derive_verdict(self, fake_conf: float) -> str:
         """Translates probability into 3-tier qualitative forensic verdict with calibrated thresholds."""
-        if fake_conf < 0.48:
-            return "AUTHENTIC"
-        elif fake_conf < 0.68:
+        calib_th = getattr(self, "calibrated_threshold", 0.580)
+        if fake_conf >= (calib_th + 0.15):
+            return "LIKELY_FAKE"
+        elif fake_conf >= calib_th:
             return "SUSPICIOUS"
         else:
-            return "LIKELY_FAKE"
+            return "AUTHENTIC"
 
     def analyze_image(self, image_bytes: bytes, original_filename: str, upload_dir: str) -> dict:
         if not self.is_ready:

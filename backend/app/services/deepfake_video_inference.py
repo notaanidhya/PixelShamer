@@ -53,7 +53,7 @@ class VideoDeepfakeInferenceService:
         logger.info(f"  - Spatial Weights: {spatial_model_path}")
         logger.info(f"  - Video Weights:   {video_model_path}")
 
-        hidden_dim = 64
+        hidden_dim = 256
         spatial_backbone = "efficientnet_b5"
         self.calibrated_threshold = 0.450
 
@@ -61,7 +61,7 @@ class VideoDeepfakeInferenceService:
         if os.path.exists(video_model_path):
             ckpt = torch.load(video_model_path, map_location=self.device, weights_only=False)
             if isinstance(ckpt, dict):
-                hidden_dim = ckpt.get("hidden_dim", 64)
+                hidden_dim = ckpt.get("hidden_dim", 256)
                 spatial_backbone = ckpt.get("spatial_backbone", "efficientnet_b5")
                 self.calibrated_threshold = ckpt.get("optimal_threshold", 0.450)
 
@@ -131,17 +131,11 @@ class VideoDeepfakeInferenceService:
 
         duration_sec = total_video_frames / max(1.0, fps)
 
-        # Extract normalized tensor sequence and raw BGR face crops
-        tensor_seq, timestamps = self.extractor.extract_face_sequence(
+        # Extract normalized tensor sequence and raw BGR face crops in a single pass
+        tensor_seq, raw_crops_bgr, timestamps = self.extractor.extract_face_sequence(
             video_path=video_path_str,
             num_frames=num_frames,
-            return_tensors=True
-        )
-
-        raw_crops_bgr, _ = self.extractor.extract_face_sequence(
-            video_path=video_path_str,
-            num_frames=num_frames,
-            return_tensors=False
+            return_both=True
         )
 
         if tensor_seq is None or len(timestamps) == 0:
