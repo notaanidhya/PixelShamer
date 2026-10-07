@@ -316,7 +316,8 @@ def train_video_model(
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
 
-    best_score = 0.0
+    best_score = -float("inf")
+    best_val_loss = float("inf")
     best_val_auc = 0.0
     best_thresh = 0.50
     history = []
@@ -358,7 +359,8 @@ def train_video_model(
         current_lr = scheduler.get_last_lr()[-1]
 
         opt_th, opt_f1 = find_optimal_threshold(val_res["targets"], val_res["preds"])
-        composite_score = val_auc * 0.70 + (val_acc / 100.0) * 0.30
+        # Composite score: balance high AUC with low validation loss
+        composite_score = (val_auc if not np.isnan(val_auc) else 0.5) - (val_loss * 0.50)
 
         history.append({
             "epoch": epoch,
@@ -375,6 +377,7 @@ def train_video_model(
 
         if composite_score > best_score or epoch == 1:
             best_score = composite_score
+            best_val_loss = val_loss
             best_val_auc = val_auc if not np.isnan(val_auc) else 0.5
             best_thresh = opt_th
             torch.save({
