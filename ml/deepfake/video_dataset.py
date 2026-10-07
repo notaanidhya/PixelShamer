@@ -90,7 +90,7 @@ def extract_and_cache_features(
     output_cache_path.parent.mkdir(parents=True, exist_ok=True)
 
     dataset = VideoForensicsDataset(manifest_csv, num_frames=num_frames, is_training=False)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=2)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
     spatial_model.eval()
     all_features = []

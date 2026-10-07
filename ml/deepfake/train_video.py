@@ -260,8 +260,8 @@ def train_video_model(
         test_ds = CachedFeatureDataset(fake_features[70:], fake_labels[70:])
         is_pre_extracted = True
 
-    # Use multi-worker decoding for video files; in-memory tensors are zero-worker instant
-    loader_workers = 0 if is_pre_extracted else min(num_workers, os.cpu_count() or 4)
+    # Safe zero-copy workers for Windows (prevents [WinError 6] handle invalid errors)
+    loader_workers = 0
     use_pin = (device.type == "cuda")
 
     train_loader = DataLoader(
@@ -355,20 +355,20 @@ def train_video_model(
 
         print(f"{epoch:<6} | {train_loss:<10.4f} | {val_loss:<9.4f} | {val_acc:<11.2f} | {val_auc:<8.4f} | {opt_th:<12.3f} | {current_lr:<8.1e}")
 
-        if composite_score > best_score:
+        if composite_score > best_score or epoch == 1:
             best_score = composite_score
-            best_val_auc = val_auc
+            best_val_auc = val_auc if not np.isnan(val_auc) else 0.5
             best_thresh = opt_th
             torch.save({
                 "epoch": epoch,
                 "model_state": model.state_dict(),
                 "val_loss": val_loss,
                 "val_acc": val_acc,
-                "val_auc": val_auc,
+                "val_auc": best_val_auc,
                 "optimal_threshold": opt_th,
                 "num_frames": num_frames,
                 "hidden_dim": hidden_dim,
-                "spatial_backbone": "efficientnet_b5"
+                "spatial_backbone": getattr(model, "spatial_backbone", "efficientnet_b5")
             }, best_model_path)
 
     elapsed = time.time() - start_time

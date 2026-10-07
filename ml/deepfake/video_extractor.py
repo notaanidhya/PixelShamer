@@ -32,6 +32,16 @@ class VideoFaceExtractor:
         self.profile_cascade = None
         self._load_face_detectors()
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["face_cascade"] = None
+        state["profile_cascade"] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._load_face_detectors()
+
     def _load_face_detectors(self):
         """Loads Haar cascades with multi-path resolution."""
         base_dir = Path(__file__).resolve().parent
