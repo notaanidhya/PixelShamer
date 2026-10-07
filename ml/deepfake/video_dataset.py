@@ -134,60 +134,103 @@ def extract_and_cache_features(
 
     return output_cache_path
 
-def build_video_manifest(source_dir: str | Path, output_csv: str | Path) -> pd.DataFrame:
+def build_video_manifest(
+    source_dir: str | Path,
+    output_csv: str | Path,
+    limit: int | None = None,
+    balance: bool = True
+) -> pd.DataFrame:
     """
     Builds a CSV manifest from directories containing video files:
-    Looks for (real / fake) folders inside source_dir.
+    Supports standard datasets (real / fake) and Celeb-DF / FaceForensics++:
+      - Real candidates: 'real', 'original', 'actors', 'Celeb-real', 'YouTube-real'
+      - Fake candidates: 'fake', 'manipulated', 'deepfake', 'Celeb-synthesis'
     """
     source_path = Path(source_dir)
     output_path = Path(output_csv)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    records = []
     video_exts = ("*.mp4", "*.avi", "*.mov", "*.mkv", "*.webm")
+    all_videos = []
+    for ext in video_exts:
+        all_videos.extend(list(source_path.rglob(ext)))
 
-    real_candidates = [source_path / "real", source_path / "original", source_path / "actors"]
-    fake_candidates = [source_path / "fake", source_path / "manipulated", source_path / "deepfake"]
+    real_records = []
+    fake_records = []
 
-    real_dir = next((d for d in real_candidates if d.exists()), None)
-    fake_dir = next((d for d in fake_candidates if d.exists()), None)
+    for p in all_videos:
+        p_str = str(p).lower().replace("\\", "/")
+        parent_name = p.parent.name.lower()
 
-    if real_dir is None or fake_dir is None:
-        # Fallback: scan all videos and infer label from folder name
-        for ext in video_exts:
-            for p in source_path.rglob(ext):
-                parent_name = p.parent.name.lower()
-                is_fake = "fake" in parent_name or "manipulated" in parent_name
-                records.append({
-                    "filepath": str(p.resolve()),
-                    "filename": p.name,
-                    "label": 1 if is_fake else 0,
-                    "label_name": "fake" if is_fake else "real"
-                })
-    else:
-        for ext in video_exts:
-            for p in real_dir.glob(ext):
-                records.append({
-                    "filepath": str(p.resolve()),
-                    "filename": p.name,
-                    "label": 0,
-                    "label_name": "real"
-                })
-            for p in fake_dir.glob(ext):
-                records.append({
-                    "filepath": str(p.resolve()),
-                    "filename": p.name,
-                    "label": 1,
-                    "label_name": "fake"
-                })
+        # Classification heuristics
+        is_fake = (
+            "celeb-synthesis" in p_str
+            or "fake" in parent_name
+            or "manipulated" in parent_name
+            or "deepfake" in parent_name
+            or "synthesis" in parent_name
+        )
+        is_real = (
+            "celeb-real" in p_str
+            or "youtube-real" in p_str
+            or "real" in parent_name
+            or "original" in parent_name
+            or "actors" in parent_name
+        )
+
+        if is_fake and not is_real:
+            fake_records.append({
+                "filepath": str(p.resolve()),
+                "filename": p.name,
+                "label": 1,
+                "label_name": "fake"
+            })
+        elif is_real and not is_fake:
+            real_records.append({
+                "filepath": str(p.resolve()),
+                "filename": p.name,
+                "label": 0,
+                "label_name": "real"
+            })
+        elif "synthesis" in p_str:
+            fake_records.append({
+                "filepath": str(p.resolve()),
+                "filename": p.name,
+                "label": 1,
+                "label_name": "fake"
+            })
+        elif "real" in p_str:
+            real_records.append({
+                "filepath": str(p.resolve()),
+                "filename": p.name,
+                "label": 0,
+                "label_name": "real"
+            })
+
+    # Optional limiting and balancing
+    if balance and real_records and fake_records:
+        n_common = min(len(real_records), len(fake_records))
+        if limit is not None and limit > 0:
+            n_common = min(n_common, limit // 2 if limit > 1 else 1)
+        real_records = real_records[:n_common]
+        fake_records = fake_records[:n_common]
+    elif limit is not None and limit > 0:
+        half = limit // 2
+        real_records = real_records[:half]
+        fake_records = fake_records[:half]
+
+    records = real_records + fake_records
 
     if not records:
         print(f"[!] NOTICE: No video files (.mp4/.avi/.mov) found in: {source_path}")
         print("    Please place video files into subfolders like: data/video_clips/real and data/video_clips/fake")
         df = pd.DataFrame(columns=["filepath", "filename", "label", "label_name"])
     else:
+        # Shuffle for uniform distribution
+        np.random.seed(42)
+        np.random.shuffle(records)
         df = pd.DataFrame(records)
 
     df.to_csv(output_path, index=False)
-    print(f"[OK] Created video manifest at {output_path} ({len(df)} videos found)")
+    print(f"[OK] Created video manifest at {output_path} ({len(df)} videos found: {len(real_records)} Real, {len(fake_records)} Fake)")
     return df

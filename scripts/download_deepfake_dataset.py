@@ -135,10 +135,16 @@ def fetch_hf_dataset(target_dir: Path, limit: int | None = None, max_workers: in
 
 def fetch_kaggle_dataset(dataset_ref: str, target_dir: Path):
     """Downloads large benchmark datasets from Kaggle via the kaggle CLI."""
+    target_dir.mkdir(parents=True, exist_ok=True)
+    existing_videos = list(target_dir.rglob("*.mp4"))
+    if len(existing_videos) > 50:
+        print(f"[*] Found {len(existing_videos)} video files already extracted in: {target_dir}")
+        print("    Skipping download to avoid redundant network transfer.")
+        return True
+
     print("=" * 65)
     print(f"   Downloading Kaggle Dataset: {dataset_ref}")
     print("=" * 65)
-    target_dir.mkdir(parents=True, exist_ok=True)
     cmd = ["kaggle", "datasets", "download", "-d", dataset_ref, "-p", str(target_dir), "--unzip"]
     print(f"[*] Running: {' '.join(cmd)}")
     try:
@@ -166,7 +172,7 @@ def main():
         "--limit",
         type=int,
         default=None,
-        help="Limit number of real and fake clips to download (e.g. --limit 10 for quick testing)"
+        help="Limit number of real and fake clips to download (e.g. --limit 500 for fast high-accuracy training)"
     )
     parser.add_argument(
         "--threads",
@@ -181,17 +187,20 @@ def main():
     manifest_csv = base_data / "deepfake" / "video_manifest.csv"
 
     if args.source == "hf":
-        success = fetch_hf_dataset(clips_dir, limit=args.limit, max_workers=args.threads)
+        target_dir = clips_dir
+        success = fetch_hf_dataset(target_dir, limit=args.limit, max_workers=args.threads)
     elif args.source == "celeb-df":
-        success = fetch_kaggle_dataset("reubensuju/celeb-df-v2", base_data / "celeb_df")
+        target_dir = base_data / "celeb_df"
+        success = fetch_kaggle_dataset("reubensuju/celeb-df-v2", target_dir)
     elif args.source == "ff":
-        success = fetch_kaggle_dataset("xdxd003/ff-c23", base_data / "faceforensics")
+        target_dir = base_data / "faceforensics"
+        success = fetch_kaggle_dataset("xdxd003/ff-c23", target_dir)
 
     if success:
         print("\n" + "=" * 65)
         print("   Generating Spatio-Temporal Video Manifest")
         print("=" * 65)
-        df = build_video_manifest(clips_dir, manifest_csv)
+        df = build_video_manifest(target_dir, manifest_csv, limit=args.limit, balance=True)
         real_count = len(df[df["label"] == 0])
         fake_count = len(df[df["label"] == 1])
         print(f"[OK] Manifest created with {len(df)} total clips ({real_count} Real, {fake_count} Fake).")

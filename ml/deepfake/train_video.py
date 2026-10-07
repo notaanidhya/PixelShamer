@@ -203,7 +203,18 @@ def train_video_model(
         try:
             m_check = pd.read_csv(manifest_train)
             if len(m_check) > 0:
-                if not default_cache_path.exists():
+                should_extract = not default_cache_path.exists()
+                if default_cache_path.exists():
+                    try:
+                        c_chk = torch.load(default_cache_path, map_location="cpu", weights_only=True)
+                        cached_count = len(c_chk.get("features", []))
+                        if cached_count != len(m_check):
+                            print(f"[*] Manifest count ({len(m_check)}) differs from cached samples ({cached_count}). Re-caching...")
+                            should_extract = True
+                    except Exception:
+                        should_extract = True
+
+                if should_extract:
                     print(f"[*] [ACCELERATION] Pre-caching video features to utilize 64GB RAM & GPU...")
                     extract_and_cache_features(
                         manifest_csv=manifest_train,
