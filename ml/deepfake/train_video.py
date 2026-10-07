@@ -232,8 +232,8 @@ def train_video_model(
     if feature_cache_path and os.path.exists(feature_cache_path):
         print(f"[*] Loading feature cache from: {feature_cache_path}")
         cache = torch.load(feature_cache_path, map_location="cpu", weights_only=True)
-        feats = cache["features"]
-        labels = cache["labels"]
+        feats = torch.nan_to_num(cache["features"].float(), nan=0.0, posinf=1.0, neginf=-1.0)
+        labels = torch.nan_to_num(cache["labels"].float(), nan=0.0)
         names = cache.get("names", [])
         
         # Stratified 80 / 10 / 10 split with fixed seed for balanced Real/Fake distribution
@@ -346,6 +346,7 @@ def train_video_model(
     for epoch in range(1, epochs + 1):
         model.train()
         train_loss_total = 0.0
+        train_samples_seen = 0
 
         for batch_data, targets, _ in train_loader:
             batch_data = batch_data.to(device, non_blocking=True)
@@ -357,6 +358,9 @@ def train_video_model(
                 clip_logits, frame_logits, _ = model(batch_data, is_pre_extracted=is_pre_extracted)
                 loss, _ = compute_video_loss(clip_logits, frame_logits, targets, bce_criterion)
 
+            if torch.isnan(loss) or torch.isinf(loss):
+                continue
+
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -364,9 +368,10 @@ def train_video_model(
             scaler.update()
 
             train_loss_total += loss.item() * len(targets)
+            train_samples_seen += len(targets)
 
         scheduler.step()
-        train_loss = train_loss_total / max(1, len(train_ds))
+        train_loss = train_loss_total / max(1, train_samples_seen)
 
         val_res = evaluate_video_split(model, val_loader, device, threshold=0.50, is_pre_extracted=is_pre_extracted, use_amp=use_amp)
         val_loss = val_res["loss"]
