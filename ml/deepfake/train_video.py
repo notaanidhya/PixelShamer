@@ -22,6 +22,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from sklearn.metrics import roc_auc_score, accuracy_score, f1_score, precision_score, recall_score
+from sklearn.model_selection import train_test_split
 
 # Ensure root is in sys.path
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -219,14 +220,31 @@ def train_video_model(
         labels = cache["labels"]
         names = cache.get("names", [])
         
-        # Partition 80 / 10 / 10
-        total = len(feats)
-        n_train = max(1, int(total * 0.80))
-        n_val = max(1, int(total * 0.10))
+        # Stratified 80 / 10 / 10 split with fixed seed for balanced Real/Fake distribution
+        indices = np.arange(len(feats))
+        labels_arr = labels.view(-1).cpu().numpy().astype(int)
 
-        train_ds = CachedFeatureDataset(feats[:n_train], labels[:n_train], names[:n_train])
-        val_ds = CachedFeatureDataset(feats[n_train:n_train+n_val], labels[n_train:n_train+n_val], names[n_train:n_train+n_val])
-        test_ds = CachedFeatureDataset(feats[n_train+n_val:], labels[n_train+n_val:], names[n_train+n_val:])
+        try:
+            train_idx, temp_idx = train_test_split(
+                indices, test_size=0.20, stratify=labels_arr, random_state=42
+            )
+            val_idx, test_idx = train_test_split(
+                temp_idx, test_size=0.50, stratify=labels_arr[temp_idx], random_state=42
+            )
+        except Exception:
+            np.random.seed(42)
+            perm = np.random.permutation(len(feats))
+            n_tr = max(1, int(len(feats) * 0.80))
+            n_va = max(1, int(len(feats) * 0.10))
+            train_idx = perm[:n_tr]
+            val_idx = perm[n_tr:n_tr+n_va]
+            test_idx = perm[n_tr+n_va:]
+
+        names_arr = np.array(names) if names else np.array([f"sample_{i}" for i in indices])
+
+        train_ds = CachedFeatureDataset(feats[train_idx], labels[train_idx], names_arr[train_idx].tolist())
+        val_ds = CachedFeatureDataset(feats[val_idx], labels[val_idx], names_arr[val_idx].tolist())
+        test_ds = CachedFeatureDataset(feats[test_idx], labels[test_idx], names_arr[test_idx].tolist())
         is_pre_extracted = True
     elif manifest_train and os.path.exists(manifest_train):
         manifest_valid = False
