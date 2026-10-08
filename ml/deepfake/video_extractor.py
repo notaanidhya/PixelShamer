@@ -163,38 +163,43 @@ class VideoFaceExtractor:
         timestamps = []
         last_valid_bbox = None
 
-        current_frame_idx = 0
-        target_pos = 0
-
-        while cap.isOpened() and target_pos < len(frame_indices):
+        for target_idx in frame_indices:
+            # Seek directly to target frame instead of decoding every frame sequentially.
+            # This reduces decode operations from up to 1,800 to exactly 16 seeks.
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(target_idx))
             ret, frame = cap.read()
-            if not ret:
-                break
+            if not ret or frame is None:
+                if face_crops:
+                    face_crops.append(face_crops[-1])
+                    timestamps.append(timestamps[-1])
+                continue
 
-            if current_frame_idx == frame_indices[target_pos]:
-                h_img, w_img = frame.shape[:2]
-                bbox = self.detect_face_bbox(frame)
+            h_img, w_img = frame.shape[:2]
+            bbox = self.detect_face_bbox(frame)
 
-                # Smooth tracking: if face detector misses in this frame, use last known good bbox
-                if bbox is not None:
-                    last_valid_bbox = bbox
-                elif last_valid_bbox is not None:
-                    bbox = last_valid_bbox
-                else:
-                    # Fallback to center square crop if face not yet detected
-                    min_dim = min(h_img, w_img)
-                    x1 = (w_img - min_dim) // 2
-                    y1 = (h_img - min_dim) // 2
-                    bbox = (x1, y1, min_dim, min_dim)
+            # Smooth tracking: if face detector misses in this frame, use last known good bbox
+            if bbox is not None:
+                last_valid_bbox = bbox
+            elif last_valid_bbox is not None:
+                bbox = last_valid_bbox
+            else:
+                # Fallback to center square crop if face not yet detected
+                min_dim = min(h_img, w_img)
+                x1 = (w_img - min_dim) // 2
+                y1 = (h_img - min_dim) // 2
+                bbox = (x1, y1, min_dim, min_dim)
 
-                x, y, w, h = bbox
-                crop = frame[y:y+h, x:x+w]
-                crop_resized = cv2.resize(crop, (self.target_size, self.target_size), interpolation=cv2.INTER_LINEAR)
-                face_crops.append(crop_resized)
-                timestamps.append(round(current_frame_idx / fps, 3))
-                target_pos += 1
+            x, y, w, h = bbox
+            crop = frame[y:y+h, x:x+w]
+            if crop.size == 0:
+                if face_crops:
+                    face_crops.append(face_crops[-1])
+                    timestamps.append(timestamps[-1])
+                continue
 
-            current_frame_idx += 1
+            crop_resized = cv2.resize(crop, (self.target_size, self.target_size), interpolation=cv2.INTER_LINEAR)
+            face_crops.append(crop_resized)
+            timestamps.append(round(int(target_idx) / fps, 3))
 
         cap.release()
 

@@ -367,7 +367,10 @@ def extract_features(image_input) -> dict:
     Returns a flat dict of 22 named features.
     Raises ValueError if the image cannot be loaded or is empty.
     """
-    if isinstance(image_input, (str, bytes)) or hasattr(image_input, "__fspath__"):
+    if isinstance(image_input, bytes):
+        nparr = np.frombuffer(image_input, np.uint8)
+        bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    elif isinstance(image_input, str) or hasattr(image_input, "__fspath__"):
         bgr = cv2.imread(str(image_input))
     else:
         bgr = image_input
@@ -375,9 +378,22 @@ def extract_features(image_input) -> dict:
     if bgr is None or bgr.size == 0:
         raise ValueError(f"Could not load image from: {image_input!r}")
 
-    # Standardise to a fixed working resolution to ensure feature comparability
-    # across images of different sizes (Picsum delivers 800x600 but may vary)
-    bgr = cv2.resize(bgr, (640, 480), interpolation=cv2.INTER_AREA)
+    # Standardise to a fixed working resolution (640x480) while preserving aspect ratio
+    # via letterboxing to avoid squashing portrait or cinematic aspect ratios
+    h_orig, w_orig = bgr.shape[:2]
+    if (w_orig, h_orig) == (640, 480):
+        pass
+    else:
+        scale = min(640 / w_orig, 480 / h_orig)
+        new_w, new_h = int(w_orig * scale), int(h_orig * scale)
+        resized = cv2.resize(bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        pad_vert = 480 - new_h
+        pad_horiz = 640 - new_w
+        pad_top = pad_vert // 2
+        pad_bottom = pad_vert - pad_top
+        pad_left = pad_horiz // 2
+        pad_right = pad_horiz - pad_left
+        bgr = cv2.copyMakeBorder(resized, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_CONSTANT, value=[0, 0, 0])
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
 
     features = {}

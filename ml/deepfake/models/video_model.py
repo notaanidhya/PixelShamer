@@ -154,7 +154,7 @@ class DeepfakeVideoModel(nn.Module):
         else:
             b, t, c, h, w = x.shape
             # Flatten batch and sequence to run spatial CNN in parallel
-            x_flat = x.view(b * t, c, h, w)
+            x_flat = x.reshape(b * t, c, h, w)
             if self.freeze_spatial:
                 with torch.no_grad():
                     spatial_features = self.spatial_cnn.backbone.forward_features(x_flat)
@@ -163,16 +163,16 @@ class DeepfakeVideoModel(nn.Module):
                 spatial_features = self.spatial_cnn.backbone.forward_features(x_flat)
                 pooled = self.spatial_cnn.backbone.forward_head(spatial_features, pre_logits=True)
 
-            features = pooled.view(b, t, -1) # (B, T, 2048)
+            features = pooled.reshape(b, t, -1) # (B, T, 2048)
 
         b_curr, t_curr, _ = features.shape
 
         # Spatial frame-level forgery logits from pre-trained spatial backbone classifier
         if self.freeze_spatial:
             with torch.no_grad():
-                spatial_frame_logits = self.spatial_cnn.backbone.classifier(features.view(b_curr * t_curr, -1)).view(b_curr, t_curr)
+                spatial_frame_logits = self.spatial_cnn.backbone.classifier(features.reshape(b_curr * t_curr, -1)).reshape(b_curr, t_curr)
         else:
-            spatial_frame_logits = self.spatial_cnn.backbone.classifier(features.view(b_curr * t_curr, -1)).view(b_curr, t_curr)
+            spatial_frame_logits = self.spatial_cnn.backbone.classifier(features.reshape(b_curr * t_curr, -1)).reshape(b_curr, t_curr)
 
         # Temporal sequence processing (Bi-LSTM)
         lstm_out, _ = self.lstm(features) # (B, T, hidden_dim * 2)
