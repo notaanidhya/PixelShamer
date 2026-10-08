@@ -117,7 +117,7 @@ export default function DeepfakePanel({ result, isAnalyzing }) {
         <div className="score-hero-card" style={{ borderLeft: `4px solid ${vInfo.color}` }}>
           <div className="score-hero-top">
             <span className="mono text-xs text-muted tracking-wider uppercase">
-              EFFICIENTNET-B2 NEURAL CONFIDENCE
+              EFFICIENTNET-B5 NEURAL CONFIDENCE
             </span>
           </div>
 

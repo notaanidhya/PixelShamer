@@ -279,6 +279,7 @@ def get_result_detail(record_id: int, db: Session = Depends(get_db)):
 
     return AnalysisResponse(
         id=record.id,
+        session_id=record.session_id,
         filename=record.filename,
         quality_score=round(record.quality_score, 1),
         quality_label=record.quality_label,

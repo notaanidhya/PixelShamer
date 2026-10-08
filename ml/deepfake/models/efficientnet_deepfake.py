@@ -42,10 +42,6 @@ class EfficientNetDeepfake(nn.Module):
             nn.Linear(256, 1)
         )
 
-        # Storage for Grad-CAM feature map and gradient
-        self._target_activations = None
-        self._target_gradients = None
-        self._hook_handles = []
 
         if freeze_early_blocks:
             self.freeze_stages(freeze_up_to_stage=freeze_up_to_stage)

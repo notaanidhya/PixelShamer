@@ -39,8 +39,15 @@ export default function VideoTimelineViewer({ result, previewUrl, isAnalyzing, u
   const handlePlayPause = () => {
     if (!videoRef.current) return;
     if (videoRef.current.paused) {
-      videoRef.current.play();
-      setIsPlaying(true);
+      const playPromise = videoRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => setIsPlaying(true))
+          .catch((err) => {
+            console.warn("Video play aborted or failed:", err);
+            setIsPlaying(false);
+          });
+      }
     } else {
       videoRef.current.pause();
       setIsPlaying(false);

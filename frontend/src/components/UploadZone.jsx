@@ -144,14 +144,14 @@ export default function UploadZone({ onFileSelected, onPresetSelected, isAnalyzi
         />
 
         <div className="dropzone-content">
-          <div className="dropzone-icon-well">
+          <div className={`dropzone-icon-well ${activePipeline === "deepfake" && !isAnalyzing ? "well-dual" : ""}`}>
             {isAnalyzing ? (
               <Loader2 size={28} className="spin text-highlight" />
             ) : activePipeline === "deepfake" ? (
               <div className="dropzone-dual-icons">
-                <UploadCloud size={24} className="drop-icon" />
+                <UploadCloud size={22} className="drop-icon" />
                 <span className="drop-icon-separator mono text-muted">+</span>
-                <Film size={20} className="drop-icon-video text-highlight" style={{ opacity: 0.75 }} />
+                <Film size={20} className="drop-icon-video text-highlight" style={{ opacity: 0.85 }} />
               </div>
             ) : (
               <UploadCloud size={28} className="drop-icon" />

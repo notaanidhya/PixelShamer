@@ -165,17 +165,31 @@ class DeepfakeVideoModel(nn.Module):
 
             features = pooled.view(b, t, -1) # (B, T, 2048)
 
-        # Temporal sequence processing
+        b_curr, t_curr, _ = features.shape
+
+        # Spatial frame-level forgery logits from pre-trained spatial backbone classifier
+        if self.freeze_spatial:
+            with torch.no_grad():
+                spatial_frame_logits = self.spatial_cnn.backbone.classifier(features.view(b_curr * t_curr, -1)).view(b_curr, t_curr)
+        else:
+            spatial_frame_logits = self.spatial_cnn.backbone.classifier(features.view(b_curr * t_curr, -1)).view(b_curr, t_curr)
+
+        # Temporal sequence processing (Bi-LSTM)
         lstm_out, _ = self.lstm(features) # (B, T, hidden_dim * 2)
 
-        # Attention pooling
-        context, attn_weights = self.attention(lstm_out) # (B, 512), (B, T)
+        # Temporal Self-Attention pooling
+        context, attn_weights = self.attention(lstm_out) # (B, hidden_dim * 2), (B, T)
 
-        # Video clip prediction
-        clip_logits = self.clip_classifier(context) # (B, 1)
+        # Frame-by-frame anomaly predictions: anchored by spatial classifier with temporal sequence adjustment
+        temporal_frame_delta = self.frame_classifier(lstm_out).squeeze(-1) # (B, T)
+        frame_logits = spatial_frame_logits + temporal_frame_delta # (B, T)
 
-        # Frame-by-frame anomaly predictions
-        frame_logits = self.frame_classifier(lstm_out).squeeze(-1) # (B, T)
+        # Video clip prediction: sequence representation + temporal attention pooling + peak top-3 anomaly
+        temporal_clip = self.clip_classifier(context) # (B, 1)
+        attn_pool = torch.sum(attn_weights * frame_logits, dim=1, keepdim=True) # (B, 1)
+        topk_pool = torch.topk(frame_logits, k=min(3, t_curr), dim=1).values.mean(dim=1, keepdim=True) # (B, 1)
+
+        clip_logits = temporal_clip + 0.50 * attn_pool + 0.50 * topk_pool
 
         return clip_logits, frame_logits, attn_weights
 

@@ -59,7 +59,7 @@ class VideoDeepfakeInferenceService:
 
         ckpt = None
         if os.path.exists(video_model_path):
-            ckpt = torch.load(video_model_path, map_location=self.device, weights_only=False)
+            ckpt = torch.load(video_model_path, map_location=self.device, weights_only=True)
             if isinstance(ckpt, dict):
                 hidden_dim = ckpt.get("hidden_dim", 256)
                 spatial_backbone = ckpt.get("spatial_backbone", "efficientnet_b5")
@@ -146,7 +146,7 @@ class VideoDeepfakeInferenceService:
 
         with torch.no_grad():
             clip_logits, frame_logits, attn_weights = self.model(x, is_pre_extracted=False)
-            clip_prob = float(torch.sigmoid(clip_logits)[0, 0].cpu().numpy())
+            model_clip_prob = float(torch.sigmoid(clip_logits)[0, 0].cpu().numpy())
             frame_probs = torch.sigmoid(frame_logits)[0].cpu().numpy().tolist()
             attn = attn_weights[0].cpu().numpy().tolist()
 
@@ -154,6 +154,15 @@ class VideoDeepfakeInferenceService:
         peak_idx = int(np.argmax(frame_probs))
         peak_timestamp = timestamps[peak_idx]
         peak_prob = float(frame_probs[peak_idx])
+
+        # Forensic sequence aggregation: account for sparse/localized frame manipulations
+        sorted_probs = sorted(frame_probs, reverse=True)
+        top3_anomaly = float(np.mean(sorted_probs[:min(3, len(sorted_probs))]))
+
+        if peak_prob >= 0.50:
+            clip_prob = max(model_clip_prob, 0.65 * top3_anomaly + 0.35 * peak_prob)
+        else:
+            clip_prob = model_clip_prob
 
         # Generate Grad-CAM for the peak anomaly frame
         heatmap_rel_path = None
@@ -173,10 +182,10 @@ class VideoDeepfakeInferenceService:
             except Exception as e:
                 logger.error(f"Grad-CAM generation failed for peak video frame: {e}")
 
-        # Determine verdict based on calibrated threshold
-        if clip_prob >= (self.calibrated_threshold + 0.15):
+        # Multi-factor forensic verdict combining sequence confidence with peak localized anomaly
+        if clip_prob >= 0.50 or peak_prob >= 0.75:
             verdict = "LIKELY_FAKE"
-        elif clip_prob >= self.calibrated_threshold:
+        elif clip_prob >= 0.30 or peak_prob >= 0.50:
             verdict = "SUSPICIOUS"
         else:
             verdict = "AUTHENTIC"

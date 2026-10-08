@@ -285,6 +285,9 @@ def train_video_model(
         except Exception as e:
             print(f"[!] Pre-caching check bypassed: {e}")
 
+    if not feature_cache_path and default_cache_path.exists():
+        feature_cache_path = str(default_cache_path)
+
     # Check for feature cache (highest performance on 64GB RAM)
     if feature_cache_path and os.path.exists(feature_cache_path):
         print(f"[*] Loading feature cache from: {feature_cache_path}")

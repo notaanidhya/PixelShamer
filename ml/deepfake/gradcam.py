@@ -1,7 +1,7 @@
 """
 ml/deepfake/gradcam.py
 ======================
-Gradient-weighted Class Activation Mapping (Grad-CAM) for EfficientNet-B2.
+Gradient-weighted Class Activation Mapping (Grad-CAM) for EfficientNet-B5.
 Produces spatial explainability heatmaps highlighting face forgery regions.
 """
 

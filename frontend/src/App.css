@@ -406,6 +406,20 @@
   align-items: center;
   justify-content: center;
   color: var(--accent-bright);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.dropzone-icon-well.well-dual,
+.dropzone-icon-well:has(.dropzone-dual-icons) {
+  width: auto;
+  min-width: 92px;
+  padding: 0 1rem;
+}
+
+.dropzone-box:hover .dropzone-icon-well {
+  border-color: var(--accent-bright);
+  box-shadow: 0 0 14px rgba(139, 187, 146, 0.12);
 }
 
 .primary-prompt {
@@ -1261,13 +1275,16 @@
 .dropzone-dual-icons {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  justify-content: center;
+  gap: 0.5rem;
 }
 
 .drop-icon-separator {
   font-size: 0.85rem;
   font-weight: 700;
   user-select: none;
+  color: var(--text-muted);
+  line-height: 1;
 }
 
 .timeline-section {
