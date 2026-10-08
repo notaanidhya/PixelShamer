@@ -51,7 +51,7 @@ export default function Header({ activeTab, onTabChange, onStartTour, activePipe
           </button>
           <button
             type="button"
-            className={`pipeline-btn ${activePipeline === "deepfake" ? "active" : ""}`}
+            className={`pipeline-btn ${(activePipeline === "deepfake" || activePipeline === "video_deepfake") ? "active" : ""}`}
             onClick={() => onPipelineChange("deepfake")}
             title="Switch to Deepfake Face Forgery Detection & Grad-CAM Analysis"
           >

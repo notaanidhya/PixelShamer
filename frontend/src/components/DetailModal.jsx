@@ -59,9 +59,13 @@ export default function DetailModal({ item, onClose }) {
             )}
           </div>
 
-          {!isVideo && !isDeepfakeImage && item.statistics && (
+          {!isVideo && item.statistics && (
             <div style={{ marginTop: "1.25rem" }}>
-              <MetricsMatrix statistics={item.statistics} />
+              <MetricsMatrix
+                statistics={item.statistics}
+                pipeline={isDeepfakeImage ? "deepfake" : "quality"}
+                result={item}
+              />
             </div>
           )}
         </div>

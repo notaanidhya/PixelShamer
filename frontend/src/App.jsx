@@ -43,6 +43,15 @@ export default function App() {
     } catch (e) {}
   }, []);
 
+  // Revoke blob URLs when previewUrl changes to prevent browser memory leaks
+  useEffect(() => {
+    return () => {
+      if (previewUrl && previewUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
+
   const handlePipelineChange = (pipeline) => {
     if (pipeline === activePipeline) return;
     setActivePipeline(pipeline);
@@ -72,12 +81,12 @@ export default function App() {
       let data;
 
       if (detectedType === "video") {
-        // Video deepfake analysis (only makes sense in deepfake pipeline)
-        if (activePipeline !== "deepfake") {
-          throw new Error("Video files can only be analyzed in the Deepfake Detection pipeline. Switch the pipeline in the header.");
+        // If user drops video while in quality mode, auto-switch to deepfake pipeline
+        if (activePipeline !== "deepfake" && activePipeline !== "video_deepfake") {
+          setActivePipeline("deepfake");
         }
         data = await analyzeVideoDeepfake(file, (pct) => setUploadProgress(pct));
-      } else if (activePipeline === "deepfake") {
+      } else if (activePipeline === "deepfake" || activePipeline === "video_deepfake") {
         // Image deepfake analysis
         data = await analyzeDeepfake(file);
       } else {
@@ -106,7 +115,7 @@ export default function App() {
     setUploadProgress(null);
 
     try {
-      if (activePipeline === "deepfake") {
+      if (activePipeline === "deepfake" || activePipeline === "video_deepfake") {
         // Deepfake preset: fetch sample blob and execute deepfake analysis
         const response = await fetch(preset.file);
         if (!response.ok) throw new Error(`Preset file not found: ${preset.file}`);
@@ -153,8 +162,8 @@ export default function App() {
 
   // Determine which viewer and panel to show
   const isVideoResult = mediaType === "video";
-  const showVideoPanel = activePipeline === "deepfake" && isVideoResult;
-  const showImageDeepfakePanel = activePipeline === "deepfake" && !isVideoResult;
+  const showVideoPanel = (activePipeline === "deepfake" || activePipeline === "video_deepfake") && isVideoResult;
+  const showImageDeepfakePanel = (activePipeline === "deepfake" || activePipeline === "video_deepfake") && !isVideoResult;
   const showQualityPanel = activePipeline === "quality";
 
   return (
