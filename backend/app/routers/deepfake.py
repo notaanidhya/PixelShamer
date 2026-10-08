@@ -339,6 +339,28 @@ async def analyze_video_deepfake_endpoint(
             detail="Video stream contains 0 decodable frames."
         )
 
+    # 4b. Ensure video stream is encoded with browser-compatible H.264 (yuv420p)
+    try:
+        import imageio_ffmpeg
+        import subprocess
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        tmp_h264 = video_disk_path + ".h264.mp4"
+        cmd = [
+            ffmpeg_exe, "-y", "-v", "error",
+            "-i", video_disk_path,
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-crf", "22",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            tmp_h264
+        ]
+        res = subprocess.run(cmd, timeout=15)
+        if res.returncode == 0 and os.path.exists(tmp_h264) and os.path.getsize(tmp_h264) > 0:
+            os.replace(tmp_h264, video_disk_path)
+    except Exception as transcode_err:
+        logger.warning(f"Browser H.264 transcode fallback: {transcode_err}")
+
     # 5. Execute neural spatio-temporal video inference (offloaded to threadpool)
     prune_old_uploads(videos_dir, max_files=50, db=db)
     try:
