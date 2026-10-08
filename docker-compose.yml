@@ -33,6 +33,7 @@ services:
     volumes:
       - ./backend/uploads:/app/backend/uploads
       - ./ml/models:/app/ml/models
+      - ./ml/deepfake/models:/app/ml/deepfake/models
     ports:
       - "8000:8000"
     depends_on:

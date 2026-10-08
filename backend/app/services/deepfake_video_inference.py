@@ -13,6 +13,7 @@ import os
 import sys
 import uuid
 import logging
+import threading
 import cv2
 import numpy as np
 import torch
@@ -36,6 +37,7 @@ class VideoDeepfakeInferenceService:
         self.gradcam = None
         self.calibrated_threshold = 0.450
         self.is_ready = False
+        self._inference_lock = threading.Lock()
 
     def load_models(self, video_model_path: str | None = None, spatial_model_path: str | None = None):
         """Loads video model weights and initializes spatial Grad-CAM hooks."""
@@ -141,46 +143,47 @@ class VideoDeepfakeInferenceService:
         if tensor_seq is None or len(timestamps) == 0:
             raise ValueError(f"Could not extract facial frames from video: {original_filename}")
 
-        # Forward pass: shape (1, T, 3, H, W)
-        x = tensor_seq.unsqueeze(0).to(self.device)
+        with self._inference_lock:
+            # Forward pass: shape (1, T, 3, H, W)
+            x = tensor_seq.unsqueeze(0).to(self.device)
 
-        with torch.no_grad():
-            clip_logits, frame_logits, attn_weights = self.model(x, is_pre_extracted=False)
-            model_clip_prob = float(torch.sigmoid(clip_logits)[0, 0].cpu().numpy())
-            frame_probs = torch.sigmoid(frame_logits)[0].cpu().numpy().tolist()
-            attn = attn_weights[0].cpu().numpy().tolist()
+            with torch.no_grad():
+                clip_logits, frame_logits, attn_weights = self.model(x, is_pre_extracted=False)
+                model_clip_prob = float(torch.sigmoid(clip_logits)[0, 0].cpu().numpy())
+                frame_probs = torch.sigmoid(frame_logits)[0].cpu().numpy().tolist()
+                attn = attn_weights[0].cpu().numpy().tolist()
 
-        # Identify peak anomalous frame
-        peak_idx = int(np.argmax(frame_probs))
-        peak_timestamp = timestamps[peak_idx]
-        peak_prob = float(frame_probs[peak_idx])
+            # Identify peak anomalous frame
+            peak_idx = int(np.argmax(frame_probs))
+            peak_timestamp = timestamps[peak_idx]
+            peak_prob = float(frame_probs[peak_idx])
 
-        # Forensic sequence aggregation: account for sparse/localized frame manipulations
-        sorted_probs = sorted(frame_probs, reverse=True)
-        top3_anomaly = float(np.mean(sorted_probs[:min(3, len(sorted_probs))]))
+            # Forensic sequence aggregation: account for sparse/localized frame manipulations
+            sorted_probs = sorted(frame_probs, reverse=True)
+            top3_anomaly = float(np.mean(sorted_probs[:min(3, len(sorted_probs))]))
 
-        if peak_prob >= 0.50:
-            clip_prob = max(model_clip_prob, 0.65 * top3_anomaly + 0.35 * peak_prob)
-        else:
-            clip_prob = model_clip_prob
+            if peak_prob >= 0.50:
+                clip_prob = max(model_clip_prob, 0.65 * top3_anomaly + 0.35 * peak_prob)
+            else:
+                clip_prob = model_clip_prob
 
-        # Generate Grad-CAM for the peak anomaly frame
-        heatmap_rel_path = None
-        if self.gradcam is not None and raw_crops_bgr is not None and len(raw_crops_bgr) > peak_idx:
-            try:
-                peak_tensor = tensor_seq[peak_idx:peak_idx+1].to(self.device)
-                cam_map = self.gradcam.generate_cam(peak_tensor)
-                peak_raw_bgr = raw_crops_bgr[peak_idx]
-                overlay, _ = self.gradcam.generate_overlay(peak_raw_bgr, cam_map, alpha=0.35)
+            # Generate Grad-CAM for the peak anomaly frame
+            heatmap_rel_path = None
+            if self.gradcam is not None and raw_crops_bgr is not None and len(raw_crops_bgr) > peak_idx:
+                try:
+                    peak_tensor = tensor_seq[peak_idx:peak_idx+1].to(self.device)
+                    cam_map = self.gradcam.generate_cam(peak_tensor)
+                    peak_raw_bgr = raw_crops_bgr[peak_idx]
+                    overlay, _ = self.gradcam.generate_overlay(peak_raw_bgr, cam_map, alpha=0.35)
 
-                heatmaps_dir = os.path.join(upload_dir, "deepfake", "heatmaps")
-                os.makedirs(heatmaps_dir, exist_ok=True)
-                heatmap_filename = f"df_vid_{uuid.uuid4().hex[:10]}_heatmap.jpg"
-                heatmap_abs_path = os.path.join(heatmaps_dir, heatmap_filename)
-                cv2.imwrite(heatmap_abs_path, overlay)
-                heatmap_rel_path = f"/uploads/deepfake/heatmaps/{heatmap_filename}"
-            except Exception as e:
-                logger.error(f"Grad-CAM generation failed for peak video frame: {e}")
+                    heatmaps_dir = os.path.join(upload_dir, "deepfake", "heatmaps")
+                    os.makedirs(heatmaps_dir, exist_ok=True)
+                    heatmap_filename = f"df_vid_{uuid.uuid4().hex[:10]}_heatmap.jpg"
+                    heatmap_abs_path = os.path.join(heatmaps_dir, heatmap_filename)
+                    cv2.imwrite(heatmap_abs_path, overlay)
+                    heatmap_rel_path = f"/uploads/deepfake/heatmaps/{heatmap_filename}"
+                except Exception as e:
+                    logger.error(f"Grad-CAM generation failed for peak video frame: {e}")
 
         # Multi-factor forensic verdict combining sequence confidence with peak localized anomaly
         if clip_prob >= 0.50 or peak_prob >= 0.75:
