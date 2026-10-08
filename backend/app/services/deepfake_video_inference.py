@@ -158,14 +158,22 @@ class VideoDeepfakeInferenceService:
             peak_timestamp = timestamps[peak_idx]
             peak_prob = float(frame_probs[peak_idx])
 
-            # Forensic sequence aggregation: account for sparse/localized frame manipulations
-            sorted_probs = sorted(frame_probs, reverse=True)
-            top3_anomaly = float(np.mean(sorted_probs[:min(3, len(sorted_probs))]))
+            # Forensic consensus analysis across sequence:
+            # Prevents single-frame optical glare (such as eyeglasses) from falsely classifying an authentic video
+            median_p = float(np.median(frame_probs))
+            p75_p = float(np.percentile(frame_probs, 75))
 
-            if peak_prob >= 0.50:
-                clip_prob = max(model_clip_prob, 0.65 * top3_anomaly + 0.35 * peak_prob)
+            if median_p >= 0.40:
+                # Pervasive structural manipulation across majority of frames
+                clip_prob = 0.50 * model_clip_prob + 0.50 * median_p
+            elif median_p < 0.15:
+                # Clean authentic footage with potential isolated specular glare
+                clip_prob = median_p * 0.60 + min(model_clip_prob, 0.40) * 0.40 * (median_p / 0.15)
             else:
-                clip_prob = model_clip_prob
+                # Subtle or localized deepfake manipulation
+                clip_prob = 0.40 * median_p + 0.35 * p75_p + 0.25 * model_clip_prob
+
+            clip_prob = float(np.clip(clip_prob, 0.012, 0.988))
 
             # Generate Grad-CAM for the peak anomaly frame
             heatmap_rel_path = None
@@ -185,10 +193,10 @@ class VideoDeepfakeInferenceService:
                 except Exception as e:
                     logger.error(f"Grad-CAM generation failed for peak video frame: {e}")
 
-        # Multi-factor forensic verdict combining sequence confidence with peak localized anomaly
-        if clip_prob >= 0.50 or peak_prob >= 0.75:
+        # Multi-factor forensic verdict based on calibrated confidence thresholds
+        if clip_prob >= 0.60:
             verdict = "LIKELY_FAKE"
-        elif clip_prob >= 0.30 or peak_prob >= 0.50:
+        elif clip_prob >= 0.35:
             verdict = "SUSPICIOUS"
         else:
             verdict = "AUTHENTIC"

@@ -150,14 +150,24 @@ class VideoFaceExtractor:
             cap.release()
             return (None, None, []) if return_both else (None, [])
 
-        # Uniform keyframe index selection
+        # Keyframe index selection:
+        # For short clips (<= 5 seconds), sample uniformly across the entire clip.
+        # For long clips (> 5 seconds), sample 16 continuous frames at natural video cadence
+        # (e.g. ~15 effective FPS, spanning 1.2-2.0s) centered around the middle of the video.
+        # This preserves temporal sequence dynamics so Bi-LSTM temporal analysis is meaningful.
+        duration_sec = total_frames / fps
         if total_frames <= num_frames:
             frame_indices = list(range(total_frames))
-            # Pad with last frame if video is shorter than num_frames
             while len(frame_indices) < num_frames:
                 frame_indices.append(total_frames - 1)
-        else:
+        elif duration_sec <= 5.0:
             frame_indices = np.linspace(0, total_frames - 1, num=num_frames, dtype=int).tolist()
+        else:
+            # Center a 16-frame dense temporal window at ~15 FPS
+            stride = max(1, int(round(fps / 15.0)))
+            window_len = num_frames * stride
+            start_frame = max(0, (total_frames - window_len) // 2)
+            frame_indices = [min(total_frames - 1, start_frame + i * stride) for i in range(num_frames)]
 
         face_crops = []
         timestamps = []

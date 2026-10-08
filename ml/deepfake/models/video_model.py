@@ -184,12 +184,8 @@ class DeepfakeVideoModel(nn.Module):
         temporal_frame_delta = self.frame_classifier(lstm_out).squeeze(-1) # (B, T)
         frame_logits = spatial_frame_logits + temporal_frame_delta # (B, T)
 
-        # Video clip prediction: sequence representation + temporal attention pooling + peak top-3 anomaly
-        temporal_clip = self.clip_classifier(context) # (B, 1)
-        attn_pool = torch.sum(attn_weights * frame_logits, dim=1, keepdim=True) # (B, 1)
-        topk_pool = torch.topk(frame_logits, k=min(3, t_curr), dim=1).values.mean(dim=1, keepdim=True) # (B, 1)
-
-        clip_logits = temporal_clip + 0.50 * attn_pool + 0.50 * topk_pool
+        # Video clip prediction: sequence representation from trained classifier
+        clip_logits = self.clip_classifier(context) # (B, 1)
 
         return clip_logits, frame_logits, attn_weights
 
