@@ -108,8 +108,12 @@ def main():
     # Locate directory
     possible_roots = [
         BASE_DIR / "data" / "faceforensics",
+        BASE_DIR / "data" / "faceforencis",
         Path.home() / "Downloads" / "faceforensics",
+        Path.home() / "Downloads" / "faceforencis",
         Path("C:/Users/vitbopal/Downloads/faceforensics"),
+        Path("C:/Users/vitbopal/Downloads/faceforencis"),
+        Path.home() / "Downloads",
         BASE_DIR / "data",
     ]
     
