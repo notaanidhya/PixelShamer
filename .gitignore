@@ -70,6 +70,8 @@ ml/models/*_v2.pt
 ml/models/*_v2.json
 !ml/deepfake/models/deepfake_video_v2.pt
 !ml/deepfake/models/deepfake_video_v2_training_history.json
+!ml/deepfake/models/deepfake_video_ff_c23.pt
+!ml/deepfake/models/deepfake_video_ff_c23_training_history.json
 
 # OS & Editors
 *.log
