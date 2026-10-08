@@ -200,10 +200,12 @@ def evaluate_video_split(
 
 def train_video_model(
     epochs: int = 15,
-    batch_size: int = 32,
-    lr: float = 2e-4,
-    hidden_dim: int = 256,
+    batch_size: int = 16,
+    lr: float = 1.5e-4,
+    hidden_dim: int = 128,
+    num_lstm_layers: int = 1,
     spatial_checkpoint: str | None = None,
+    output_checkpoint: str | None = None,
     feature_cache_path: str | None = None,
     manifest_train: str | None = None,
     manifest_val: str | None = None,
@@ -211,8 +213,9 @@ def train_video_model(
     num_frames: int = 16,
     use_amp: bool = True,
     device_name: str | None = None,
-    num_workers: int = 4,
-    precache: bool = True
+    num_workers: int = 0,
+    precache: bool = True,
+    patience: int = 5
 ):
     if device_name is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -224,8 +227,8 @@ def train_video_model(
 
     models_dir = ROOT_DIR / "ml" / "deepfake" / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
-    best_model_path = models_dir / "deepfake_video_best.pt"
-    history_path = models_dir / "deepfake_video_training_history.json"
+    best_model_path = Path(output_checkpoint) if output_checkpoint else models_dir / "deepfake_video_v2.pt"
+    history_path = best_model_path.parent / f"{best_model_path.stem}_training_history.json"
     audit_report_path = ROOT_DIR / "data" / "deepfake" / "gate3_video_audit_report.json"
 
     # Default checkpoint resolution if not provided
@@ -235,17 +238,22 @@ def train_video_model(
         spatial_checkpoint = str(b5_ckpt if b5_ckpt.exists() else def_ckpt)
 
     print(f"[*] Initializing Phase 2 Video Model Training on Device: {device}")
+    print(f"    Target Checkpoint:  {best_model_path}")
     print(f"    Spatial Checkpoint: {spatial_checkpoint}")
     print(f"    Frames per Clip:    {num_frames}")
-    print(f"    LSTM Hidden Dim:    {hidden_dim}")
+    print(f"    LSTM Hidden Dim:    {hidden_dim} (Bi-LSTM layers={num_lstm_layers})")
     print(f"    Batch Size:         {batch_size}")
     print(f"    Mixed Precision:    {use_amp}")
+    print(f"    Early Stopping:     patience={patience}")
 
-    # Build model
+    # Build model with regularized projection bottleneck
     model = build_video_model(
         spatial_checkpoint=spatial_checkpoint,
         spatial_backbone="efficientnet_b5",
         hidden_dim=hidden_dim,
+        num_lstm_layers=num_lstm_layers,
+        use_projection=True,
+        projection_dim=256,
         freeze_spatial=True
     ).to(device)
 
@@ -302,9 +310,9 @@ def train_video_model(
         train_idx, val_idx, test_idx = partition_dataset_indices(names_list, labels_arr, seed=42)
 
         names_arr = np.array(names_list)
-        train_ds = CachedFeatureDataset(feats[train_idx], labels[train_idx], names_arr[train_idx].tolist())
-        val_ds = CachedFeatureDataset(feats[val_idx], labels[val_idx], names_arr[val_idx].tolist())
-        test_ds = CachedFeatureDataset(feats[test_idx], labels[test_idx], names_arr[test_idx].tolist())
+        train_ds = CachedFeatureDataset(feats[train_idx], labels[train_idx], names_arr[train_idx].tolist(), is_training=True)
+        val_ds = CachedFeatureDataset(feats[val_idx], labels[val_idx], names_arr[val_idx].tolist(), is_training=False)
+        test_ds = CachedFeatureDataset(feats[test_idx], labels[test_idx], names_arr[test_idx].tolist(), is_training=False)
         is_pre_extracted = True
     elif manifest_train and os.path.exists(manifest_train):
         manifest_valid = False
@@ -389,6 +397,7 @@ def train_video_model(
     best_val_loss = float("inf")
     best_val_auc = 0.0
     best_thresh = 0.50
+    patience_counter = 0
     history = []
     start_time = time.time()
 
@@ -434,7 +443,7 @@ def train_video_model(
 
         opt_th, opt_f1 = find_optimal_threshold(val_res["targets"], val_res["preds"])
         # Composite score: balance high AUC with low validation loss
-        composite_score = (val_auc if not np.isnan(val_auc) else 0.5) - (val_loss * 0.50)
+        composite_score = (val_auc if not np.isnan(val_auc) else 0.5) - (val_loss * 0.40)
 
         history.append({
             "epoch": epoch,
@@ -454,27 +463,39 @@ def train_video_model(
             best_val_loss = val_loss
             best_val_auc = val_auc if not np.isnan(val_auc) else 0.5
             best_thresh = opt_th
+            patience_counter = 0
+            # Save lightweight temporal state (3.8MB) without duplicating 116MB frozen spatial weights
+            save_state = {k: v for k, v in model.state_dict().items() if not k.startswith("spatial_cnn.")} if model.freeze_spatial else model.state_dict()
             torch.save({
                 "epoch": epoch,
-                "model_state": model.state_dict(),
+                "model_state": save_state,
                 "val_loss": val_loss,
                 "val_acc": val_acc,
                 "val_auc": best_val_auc,
                 "optimal_threshold": opt_th,
                 "num_frames": num_frames,
                 "hidden_dim": hidden_dim,
-                "spatial_backbone": getattr(model, "spatial_backbone", "efficientnet_b5")
+                "num_lstm_layers": getattr(model, "num_lstm_layers", 1),
+                "use_projection": getattr(model, "use_projection", True),
+                "projection_dim": getattr(model, "projection_dim", 256),
+                "spatial_backbone": getattr(model, "spatial_backbone", "efficientnet_b5"),
+                "version": "v2"
             }, best_model_path)
+        else:
+            patience_counter += 1
+            if patience_counter >= patience and epoch >= 6:
+                print(f"[*] Early stopping triggered at epoch {epoch} (no validation improvement for {patience} epochs).")
+                break
 
     elapsed = time.time() - start_time
     print("=" * 80)
     print(f"[OK] Video model training complete in {elapsed:.1f}s ({elapsed/60:.1f} mins).")
     print(f"[OK] Best Checkpoint: Val AUC = {best_val_auc:.4f} | Calibrated Threshold = {best_thresh:.3f}")
-    print(f"     Saved to: {best_model_path}")
+    print(f"     Saved to: {best_model_path} ({best_model_path.stat().st_size / (1024*1024):.2f} MB)")
 
     # Final Gate 3 Audit evaluation
     checkpoint = torch.load(best_model_path, map_location=device, weights_only=True)
-    model.load_state_dict(checkpoint["model_state"])
+    model.load_state_dict(checkpoint["model_state"], strict=False)
 
     test_res_calib = evaluate_video_split(model, test_loader, device, threshold=best_thresh, is_pre_extracted=is_pre_extracted, use_amp=use_amp)
     val_final_res = evaluate_video_split(model, val_loader, device, threshold=best_thresh, is_pre_extracted=is_pre_extracted, use_amp=use_amp)
@@ -543,10 +564,13 @@ def execute_gate_3_audit(train_res, val_res, test_res, output_path: Path, calibr
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Spatio-Temporal Video Deepfake Detector.")
     parser.add_argument("--epochs", type=int, default=15, help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size (default: 32 for GPU saturation)")
-    parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
-    parser.add_argument("--hidden_dim", type=int, default=256, help="LSTM hidden state dimension")
+    parser.add_argument("--batch_size", type=int, default=16, help="Batch size (default: 16)")
+    parser.add_argument("--lr", type=float, default=1.5e-4, help="Learning rate")
+    parser.add_argument("--hidden_dim", type=int, default=128, help="LSTM hidden state dimension")
+    parser.add_argument("--num_lstm_layers", type=int, default=1, help="Number of Bi-LSTM layers")
+    parser.add_argument("--patience", type=int, default=5, help="Early stopping patience")
     parser.add_argument("--spatial_checkpoint", type=str, default=None, help="Path to Phase 1 spatial weights")
+    parser.add_argument("--output_checkpoint", type=str, default=None, help="Path to save best video checkpoint")
     parser.add_argument("--feature_cache", type=str, default=None, help="Path to precomputed feature cache")
     parser.add_argument("--manifest_train", type=str, default=None, help="Path to training video manifest")
     parser.add_argument("--manifest_val", type=str, default=None, help="Path to validation video manifest")
@@ -554,7 +578,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_frames", type=int, default=16, help="Number of frames per video clip")
     parser.add_argument("--amp", action="store_true", default=True, help="Use Automatic Mixed Precision")
     parser.add_argument("--no_amp", action="store_false", dest="amp", help="Disable AMP")
-    parser.add_argument("--num_workers", type=int, default=4, help="CPU workers for data decoding")
+    parser.add_argument("--num_workers", type=int, default=0, help="CPU workers for data decoding")
     parser.add_argument("--precache", action="store_true", default=True, help="Pre-cache spatial features into RAM for 20x speedup")
     parser.add_argument("--no_precache", action="store_false", dest="precache", help="Disable pre-caching")
     args = parser.parse_args()
@@ -564,7 +588,10 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         lr=args.lr,
         hidden_dim=args.hidden_dim,
+        num_lstm_layers=args.num_lstm_layers,
+        patience=args.patience,
         spatial_checkpoint=args.spatial_checkpoint,
+        output_checkpoint=args.output_checkpoint,
         feature_cache_path=args.feature_cache,
         manifest_train=args.manifest_train,
         manifest_val=args.manifest_val,

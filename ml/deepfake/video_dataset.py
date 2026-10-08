@@ -66,16 +66,33 @@ class CachedFeatureDataset(Dataset):
     High-performance feature dataset stored directly in RAM.
     Bypasses OpenCV decoding during temporal training.
     """
-    def __init__(self, features: torch.Tensor, labels: torch.Tensor, names: list[str] | None = None):
+    def __init__(
+        self,
+        features: torch.Tensor,
+        labels: torch.Tensor,
+        names: list[str] | None = None,
+        is_training: bool = False
+    ):
         self.features = features.float() # (N, T, 2048)
         self.labels = labels.float()     # (N, 1)
         self.names = names or [f"sample_{i}" for i in range(len(features))]
+        self.is_training = is_training
 
     def __len__(self):
         return len(self.features)
 
     def __getitem__(self, idx: int):
-        return self.features[idx], self.labels[idx], self.names[idx]
+        feat = self.features[idx].clone()
+        if self.is_training:
+            # Gaussian noise injection to prevent over-memorizing specific embeddings
+            noise = torch.randn_like(feat) * 0.02
+            feat = feat + noise
+            # Random frame masking (drop 1-2 frames out of sequence)
+            if feat.shape[0] > 4 and torch.rand(1).item() < 0.35:
+                drop_idx = torch.randint(0, feat.shape[0], (1,)).item()
+                feat[drop_idx] = 0.0
+
+        return feat, self.labels[idx], self.names[idx]
 
 def extract_and_cache_features(
     manifest_csv: str | Path,
@@ -166,48 +183,31 @@ def build_video_manifest(
         parent_name = p.parent.name.lower()
 
         # Classification heuristics
-        is_fake = (
-            "celeb-synthesis" in p_str
-            or "fake" in parent_name
-            or "manipulated" in parent_name
-            or "deepfake" in parent_name
-            or "synthesis" in parent_name
-        )
         is_real = (
             "celeb-real" in p_str
             or "youtube-real" in p_str
-            or "real" in parent_name
-            or "original" in parent_name
-            or "actors" in parent_name
+            or parent_name in ["real", "original", "actors", "celeb-real", "youtube-real"]
+            or (parent_name.startswith("real") and "fake" not in parent_name)
+        )
+        is_fake = (
+            "celeb-synthesis" in p_str
+            or parent_name in ["fake", "manipulated", "synthesis", "celeb-synthesis", "faceswap"]
+            or (parent_name.startswith("fake") and "real" not in parent_name)
         )
 
-        if is_fake and not is_real:
-            fake_records.append({
-                "filepath": str(p.resolve()),
-                "filename": p.name,
-                "label": 1,
-                "label_name": "fake"
-            })
-        elif is_real and not is_fake:
+        if is_real and not is_fake:
             real_records.append({
                 "filepath": str(p.resolve()),
                 "filename": p.name,
                 "label": 0,
                 "label_name": "real"
             })
-        elif "synthesis" in p_str:
+        elif is_fake and not is_real:
             fake_records.append({
                 "filepath": str(p.resolve()),
                 "filename": p.name,
                 "label": 1,
                 "label_name": "fake"
-            })
-        elif "real" in p_str:
-            real_records.append({
-                "filepath": str(p.resolve()),
-                "filename": p.name,
-                "label": 0,
-                "label_name": "real"
             })
 
     # Optional limiting and balancing

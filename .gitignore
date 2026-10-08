@@ -68,8 +68,8 @@ scratch/
 *.bin
 ml/models/*_v2.pt
 ml/models/*_v2.json
-ml/deepfake/models/*_v2.pt
-ml/deepfake/models/*_v2.json
+!ml/deepfake/models/deepfake_video_v2.pt
+!ml/deepfake/models/deepfake_video_v2_training_history.json
 
 # OS & Editors
 *.log

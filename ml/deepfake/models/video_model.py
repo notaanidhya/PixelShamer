@@ -43,9 +43,11 @@ class DeepfakeVideoModel(nn.Module):
         spatial_checkpoint: str | None = None,
         spatial_backbone: str = "efficientnet_b5",
         spatial_feature_dim: int | None = None,
-        hidden_dim: int = 256,
-        num_lstm_layers: int = 2,
-        freeze_spatial: bool = True
+        hidden_dim: int = 128,
+        num_lstm_layers: int = 1,
+        freeze_spatial: bool = True,
+        use_projection: bool = True,
+        projection_dim: int = 256
     ):
         super().__init__()
         
@@ -56,6 +58,10 @@ class DeepfakeVideoModel(nn.Module):
             if isinstance(ckpt, dict):
                 spatial_backbone = ckpt.get("architecture", spatial_backbone)
                 ckpt_state = ckpt.get("model_state", ckpt)
+                use_projection = ckpt.get("use_projection", use_projection)
+                projection_dim = ckpt.get("projection_dim", projection_dim)
+                hidden_dim = ckpt.get("hidden_dim", hidden_dim)
+                num_lstm_layers = ckpt.get("num_lstm_layers", num_lstm_layers)
             else:
                 ckpt_state = ckpt
             print(f"[*] Loaded spatial checkpoint ({spatial_backbone}) from: {spatial_checkpoint}")
@@ -79,7 +85,10 @@ class DeepfakeVideoModel(nn.Module):
         self.spatial_feature_dim = spatial_feature_dim
         self.spatial_backbone = spatial_backbone
         self.hidden_dim = hidden_dim
+        self.num_lstm_layers = num_lstm_layers
         self.freeze_spatial = freeze_spatial
+        self.use_projection = use_projection
+        self.projection_dim = projection_dim
 
         # Retain classification head so spatial CNN can generate genuine class logits for Grad-CAM explainability
         # forward_head(..., pre_logits=True) extracts raw features without altering the classifier.
@@ -87,9 +96,22 @@ class DeepfakeVideoModel(nn.Module):
         if freeze_spatial:
             self.freeze_spatial_backbone()
 
-        # 2. Temporal Sequence Modeling (Bi-LSTM)
+        # 2. Regularized Feature Projection Bottleneck (reduces 2048 -> 256, prevents overfitting)
+        if use_projection:
+            self.feature_proj = nn.Sequential(
+                nn.Linear(self.spatial_feature_dim, projection_dim),
+                nn.LayerNorm(projection_dim),
+                nn.SiLU(inplace=True),
+                nn.Dropout(0.35)
+            )
+            lstm_in_dim = projection_dim
+        else:
+            self.feature_proj = None
+            lstm_in_dim = self.spatial_feature_dim
+
+        # 3. Temporal Sequence Modeling (Bi-LSTM)
         self.lstm = nn.LSTM(
-            input_size=self.spatial_feature_dim,
+            input_size=lstm_in_dim,
             hidden_size=hidden_dim,
             num_layers=num_lstm_layers,
             batch_first=True,
@@ -99,21 +121,21 @@ class DeepfakeVideoModel(nn.Module):
 
         lstm_out_dim = hidden_dim * 2 # Bidirectional
 
-        # 3. Temporal Self-Attention Pooling
+        # 4. Temporal Self-Attention Pooling
         self.attention = TemporalAttention(in_features=lstm_out_dim, hidden_dim=64)
 
-        # 4. Final Video Classification Head (Clip Verdict)
+        # 5. Final Video Classification Head (Clip Verdict)
         self.clip_classifier = nn.Sequential(
-            nn.Dropout(0.3),
+            nn.Dropout(0.35),
             nn.Linear(lstm_out_dim, 64),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
+            nn.SiLU(inplace=True),
+            nn.Dropout(0.20),
             nn.Linear(64, 1)
         )
 
-        # 5. Frame-level Auxiliary Classifier (For Frame Timeline)
+        # 6. Frame-level Auxiliary Classifier (For Frame Timeline)
         self.frame_classifier = nn.Sequential(
-            nn.Dropout(0.2),
+            nn.Dropout(0.20),
             nn.Linear(lstm_out_dim, 1)
         )
 
@@ -174,8 +196,13 @@ class DeepfakeVideoModel(nn.Module):
         else:
             spatial_frame_logits = self.spatial_cnn.backbone.classifier(features.reshape(b_curr * t_curr, -1)).reshape(b_curr, t_curr)
 
-        # Temporal sequence processing (Bi-LSTM)
-        lstm_out, _ = self.lstm(features) # (B, T, hidden_dim * 2)
+        # Temporal sequence processing (Bi-LSTM with optional projection bottleneck)
+        if self.use_projection and self.feature_proj is not None:
+            lstm_inputs = self.feature_proj(features)
+        else:
+            lstm_inputs = features
+
+        lstm_out, _ = self.lstm(lstm_inputs) # (B, T, hidden_dim * 2)
 
         # Temporal Self-Attention pooling
         context, attn_weights = self.attention(lstm_out) # (B, hidden_dim * 2), (B, T)
@@ -223,7 +250,10 @@ class DeepfakeVideoModel(nn.Module):
 def build_video_model(
     spatial_checkpoint: str | None = None,
     spatial_backbone: str = "efficientnet_b5",
-    hidden_dim: int = 256,
+    hidden_dim: int = 128,
+    num_lstm_layers: int = 1,
+    use_projection: bool = True,
+    projection_dim: int = 256,
     freeze_spatial: bool = True
 ) -> DeepfakeVideoModel:
     dim = 2048 if "b5" in spatial_backbone else 1408
@@ -232,5 +262,8 @@ def build_video_model(
         spatial_backbone=spatial_backbone,
         spatial_feature_dim=dim,
         hidden_dim=hidden_dim,
+        num_lstm_layers=num_lstm_layers,
+        use_projection=use_projection,
+        projection_dim=projection_dim,
         freeze_spatial=freeze_spatial
     )

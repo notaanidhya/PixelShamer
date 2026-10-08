@@ -44,7 +44,9 @@ class VideoDeepfakeInferenceService:
         models_dir = os.path.join(BASE_DIR, "ml", "deepfake", "models")
         
         if video_model_path is None:
-            video_model_path = os.path.join(models_dir, "deepfake_video_best.pt")
+            v2_path = os.path.join(models_dir, "deepfake_video_v2.pt")
+            v1_path = os.path.join(models_dir, "deepfake_video_best.pt")
+            video_model_path = v2_path if os.path.exists(v2_path) else v1_path
 
         if spatial_model_path is None:
             b5_path = os.path.join(models_dir, "efficientnet_b5_deepfake_best.pt")
@@ -56,6 +58,8 @@ class VideoDeepfakeInferenceService:
         logger.info(f"  - Video Weights:   {video_model_path}")
 
         hidden_dim = 256
+        num_lstm_layers = 2
+        use_projection = False
         spatial_backbone = "efficientnet_b5"
         self.calibrated_threshold = 0.450
 
@@ -63,7 +67,9 @@ class VideoDeepfakeInferenceService:
         if os.path.exists(video_model_path):
             ckpt = torch.load(video_model_path, map_location=self.device, weights_only=True)
             if isinstance(ckpt, dict):
-                hidden_dim = ckpt.get("hidden_dim", 256)
+                use_projection = ckpt.get("use_projection", False)
+                hidden_dim = ckpt.get("hidden_dim", 128 if use_projection else 256)
+                num_lstm_layers = ckpt.get("num_lstm_layers", 1 if use_projection else 2)
                 spatial_backbone = ckpt.get("spatial_backbone", "efficientnet_b5")
                 self.calibrated_threshold = ckpt.get("optimal_threshold", 0.450)
 
@@ -72,6 +78,8 @@ class VideoDeepfakeInferenceService:
             spatial_checkpoint=spatial_model_path,
             spatial_backbone=spatial_backbone,
             hidden_dim=hidden_dim,
+            num_lstm_layers=num_lstm_layers,
+            use_projection=use_projection,
             freeze_spatial=True
         ).to(self.device)
 
