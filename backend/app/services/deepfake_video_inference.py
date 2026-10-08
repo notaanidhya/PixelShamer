@@ -44,9 +44,15 @@ class VideoDeepfakeInferenceService:
         models_dir = os.path.join(BASE_DIR, "ml", "deepfake", "models")
         
         if video_model_path is None:
+            ff_path = os.path.join(models_dir, "deepfake_video_ff_c23.pt")
             v2_path = os.path.join(models_dir, "deepfake_video_v2.pt")
             v1_path = os.path.join(models_dir, "deepfake_video_best.pt")
-            video_model_path = v2_path if os.path.exists(v2_path) else v1_path
+            if os.path.exists(ff_path):
+                video_model_path = ff_path
+            elif os.path.exists(v2_path):
+                video_model_path = v2_path
+            else:
+                video_model_path = v1_path
 
         if spatial_model_path is None:
             b5_path = os.path.join(models_dir, "efficientnet_b5_deepfake_best.pt")
