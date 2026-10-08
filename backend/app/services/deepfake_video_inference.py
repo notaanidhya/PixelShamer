@@ -166,22 +166,20 @@ class VideoDeepfakeInferenceService:
             peak_timestamp = timestamps[peak_idx]
             peak_prob = float(frame_probs[peak_idx])
 
-            # Forensic consensus analysis across sequence:
-            # Prevents single-frame optical glare (such as eyeglasses) from falsely classifying an authentic video
+            # Multi-factor temporal sequence consensus:
+            # Integrates global Bi-LSTM sequence prediction with top anomalous frames
+            top3_p = float(np.mean(sorted(frame_probs, reverse=True)[:3]))
             median_p = float(np.median(frame_probs))
-            p75_p = float(np.percentile(frame_probs, 75))
+            raw_consensus = 0.60 * model_clip_prob + 0.30 * top3_p + 0.10 * median_p
 
-            if median_p >= 0.40:
-                # Pervasive structural manipulation across majority of frames
-                clip_prob = 0.50 * model_clip_prob + 0.50 * median_p
-            elif median_p < 0.15:
-                # Clean authentic footage with potential isolated specular glare
-                clip_prob = median_p * 0.60 + min(model_clip_prob, 0.40) * 0.40 * (median_p / 0.15)
+            # Calibrate against optimal decision threshold from checkpoint
+            th = self.calibrated_threshold
+            if raw_consensus >= th:
+                calibrated_prob = 0.50 + 0.50 * (raw_consensus - th) / max(0.01, 1.0 - th)
             else:
-                # Subtle or localized deepfake manipulation
-                clip_prob = 0.40 * median_p + 0.35 * p75_p + 0.25 * model_clip_prob
+                calibrated_prob = 0.50 * (raw_consensus / max(0.01, th))
 
-            clip_prob = float(np.clip(clip_prob, 0.012, 0.988))
+            clip_prob = float(np.clip(calibrated_prob, 0.012, 0.988))
 
             # Generate Grad-CAM for the peak anomaly frame
             heatmap_rel_path = None
