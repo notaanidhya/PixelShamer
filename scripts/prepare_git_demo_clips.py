@@ -88,45 +88,17 @@ def search_candidate_videos():
                 
     return found_real, found_fake
 
-def transcode_clip(src_path: Path, dst_path: Path, max_duration_sec: float = 8.0):
-    """Transcodes video to H.264 (avc1) web-compatible format, trimmed to ~8s for fast git push."""
-    cap = cv2.VideoCapture(str(src_path))
-    if not cap.isOpened():
-        return False
-        
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    max_frames = int(fps * max_duration_sec)
-    
-    # Scale down if 1080p+ to keep file size < 2MB
-    target_w, target_h = w, h
-    if target_h > 720:
-        target_w = int(w * (720 / h))
-        target_h = 720
-    # Ensure even dimensions for video codecs
-    target_w -= target_w % 2
-    target_h -= target_h % 2
+import shutil
 
-    fourcc = cv2.VideoWriter_fourcc(*'avc1')
-    out = cv2.VideoWriter(str(dst_path), fourcc, fps, (target_w, target_h))
-    if not out.isOpened():
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(str(dst_path), fourcc, fps, (target_w, target_h))
-        
-    frame_count = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret or frame_count >= max_frames:
-            break
-        if (target_w, target_h) != (w, h):
-            frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
-        out.write(frame)
-        frame_count += 1
-        
-    cap.release()
-    out.release()
-    return dst_path.exists() and dst_path.stat().st_size > 1024
+def copy_or_transcode_clip(src_path: Path, dst_path: Path):
+    """Copies video clip directly (instant & preserves native container)."""
+    try:
+        # Celeb-DF clips are already native H.264 MP4s under 3MB
+        shutil.copy2(src_path, dst_path)
+        return dst_path.exists() and dst_path.stat().st_size > 1024
+    except Exception as e:
+        print(f"  [!] Copy failed: {e}")
+        return False
 
 def main():
     REAL_DEMO.mkdir(parents=True, exist_ok=True)
@@ -147,7 +119,7 @@ def main():
     total_bytes = 0
     for idx, src in enumerate(selected_reals, start=1):
         dst = REAL_DEMO / f"celeb_real_{idx:02d}.mp4"
-        success = transcode_clip(src, dst)
+        success = copy_or_transcode_clip(src, dst)
         if success:
             sz = dst.stat().st_size / (1024 * 1024)
             total_bytes += dst.stat().st_size
@@ -155,7 +127,7 @@ def main():
             
     for idx, src in enumerate(selected_fakes, start=1):
         dst = FAKE_DEMO / f"celeb_fake_{idx:02d}.mp4"
-        success = transcode_clip(src, dst)
+        success = copy_or_transcode_clip(src, dst)
         if success:
             sz = dst.stat().st_size / (1024 * 1024)
             total_bytes += dst.stat().st_size
