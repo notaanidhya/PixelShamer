@@ -49,22 +49,31 @@ def search_candidate_videos():
             continue
         print(f"  - Searching in: {base}")
         for root, dirs, files in os.walk(base):
-            # Check directory names
-            lower_root = root.lower()
-            is_real_dir = any(k in lower_root for k in ["real", "original", "actors", "youtube"])
-            is_fake_dir = any(k in lower_root for k in ["fake", "manipulated", "deepfake", "faceswap", "neuraltextures", "face2face", "face_swap", "df"])
+            p_str = root.lower().replace("\\", "/")
+            parent_name = os.path.basename(root).lower()
+            
+            # Specific dataset folder checks (prevents matching parent folder 'deepfake project')
+            is_real_dir = (
+                "celeb-real" in p_str
+                or "youtube-real" in p_str
+                or parent_name in ["real", "original", "actors", "celeb-real", "youtube-real"]
+            )
+            is_fake_dir = (
+                "celeb-synthesis" in p_str
+                or parent_name in ["fake", "manipulated", "synthesis", "celeb-synthesis", "faceswap"]
+            )
             
             for f in files:
                 if f.lower().endswith((".mp4", ".avi", ".mov")):
                     full = os.path.join(root, f)
                     lower_f = f.lower()
                     
-                    if is_fake_dir or any(k in lower_f for k in ["fake", "df_", "synth"]):
-                        if full not in found_fake and is_valid_video_clip(full):
-                            found_fake.append(full)
-                    elif is_real_dir or any(k in lower_f for k in ["real", "orig"]):
+                    if is_real_dir or any(k in lower_f for k in ["real", "orig"]):
                         if full not in found_real and is_valid_video_clip(full):
                             found_real.append(full)
+                    elif is_fake_dir or any(k in lower_f for k in ["fake", "df_", "synth"]):
+                        if full not in found_fake and is_valid_video_clip(full):
+                            found_fake.append(full)
                             
             if len(found_real) >= 30 and len(found_fake) >= 30:
                 break
