@@ -108,18 +108,26 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.include_router(analysis.router)
 app.include_router(deepfake_router.router)
 
+# Allowed CORS origins for the exception handler (must match app CORSMiddleware)
+_CORS_ALLOWED_ORIGINS = set(os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173").split(","))
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled error processing {request.url.path}: {str(exc)}", exc_info=True)
-    origin = request.headers.get("origin", "*")
+
+    # Only reflect origin if it is in the configured whitelist (prevents CORS origin reflection attacks)
+    request_origin = request.headers.get("origin", "")
+    safe_origin = request_origin if request_origin in _CORS_ALLOWED_ORIGINS else "null"
+
     response = JSONResponse(
         status_code=500,
-        content={"detail": f"Internal server error: {str(exc)}"}
+        content={"detail": "An internal server error occurred. Please try again."}
     )
-    response.headers["Access-Control-Allow-Origin"] = origin
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    response.headers["Access-Control-Allow-Methods"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "*"
+    if safe_origin and safe_origin != "null":
+        response.headers["Access-Control-Allow-Origin"] = safe_origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
     return response
 
 @app.api_route("/api/health", methods=["GET", "HEAD"], response_model=HealthResponse, tags=["System"])

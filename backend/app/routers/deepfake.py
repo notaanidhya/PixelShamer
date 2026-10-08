@@ -39,8 +39,11 @@ MAX_FILE_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_MB", "15")) * 1024 * 1024
 MAX_VIDEO_FILE_SIZE_BYTES = int(os.getenv("MAX_VIDEO_UPLOAD_SIZE_MB", "100")) * 1024 * 1024
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "uploads"))
 
-def prune_old_uploads(target_dir: str, max_files: int = 50):
-    """Automatically prunes oldest video files if storage exceeds retention limit."""
+def prune_old_uploads(target_dir: str, max_files: int = 50, db=None):
+    """
+    Automatically prunes oldest video files if storage exceeds retention limit.
+    Also removes the corresponding database record to keep disk and DB in sync.
+    """
     try:
         if not os.path.exists(target_dir):
             return
@@ -48,13 +51,28 @@ def prune_old_uploads(target_dir: str, max_files: int = 50):
             os.path.join(target_dir, f) for f in os.listdir(target_dir)
             if os.path.isfile(os.path.join(target_dir, f))
         ]
-        if len(files) > max_files:
-            files.sort(key=os.path.getmtime)
-            for old_file in files[:len(files) - max_files]:
-                try:
-                    os.remove(old_file)
-                except Exception:
-                    pass
+        if len(files) <= max_files:
+            return
+        files.sort(key=os.path.getmtime)
+        for old_file in files[:len(files) - max_files]:
+            try:
+                basename = os.path.basename(old_file)
+                os.remove(old_file)
+                logger.info(f"Pruned old video file: {basename}")
+                # Also remove the database record for this file if db session provided
+                if db is not None:
+                    stale = db.query(VideoDeepfakeRecord).filter(
+                        VideoDeepfakeRecord.stored_filename == basename
+                    ).first()
+                    if stale:
+                        db.delete(stale)
+            except Exception as e:
+                logger.warning(f"Pruning error for {old_file}: {e}")
+        if db is not None:
+            try:
+                db.commit()
+            except Exception:
+                pass
     except Exception as e:
         logger.warning(f"Storage pruning bypassed: {e}")
 
@@ -268,30 +286,37 @@ async def analyze_video_deepfake_endpoint(
             detail=f"Unsupported video format '{ext}'. Allowed formats: {', '.join(sorted(ALLOWED_VIDEO_EXTENSIONS))}"
         )
 
-    # 2. Read bytes & size check
-    try:
-        content = await video.read()
-    except Exception:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to read uploaded video file.")
-
-    if len(content) == 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded video file is empty (0 bytes).")
-
-    if len(content) > MAX_VIDEO_FILE_SIZE_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Video exceeds maximum allowed size of {MAX_VIDEO_FILE_SIZE_BYTES // (1024*1024)} MB."
-        )
-
-    # 3. Save to disk temporarily / for serving
+    # 2. Stream video directly to disk (avoids buffering entire 100MB in RAM)
     videos_dir = os.path.join(UPLOAD_DIR, "deepfake", "videos")
     os.makedirs(videos_dir, exist_ok=True)
     video_uuid = uuid.uuid4().hex[:12]
     stored_filename = f"df_vid_{video_uuid}{ext}"
     video_disk_path = os.path.join(videos_dir, stored_filename)
 
-    with open(video_disk_path, "wb") as f:
-        f.write(content)
+    bytes_written = 0
+    try:
+        with open(video_disk_path, "wb") as f:
+            for chunk in iter(lambda: video.file.read(65536), b""):
+                bytes_written += len(chunk)
+                if bytes_written > MAX_VIDEO_FILE_SIZE_BYTES:
+                    f.close()
+                    os.remove(video_disk_path)
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"Video exceeds maximum allowed size of {MAX_VIDEO_FILE_SIZE_BYTES // (1024*1024)} MB."
+                    )
+                f.write(chunk)
+    except HTTPException:
+        raise
+    except Exception:
+        if os.path.exists(video_disk_path):
+            os.remove(video_disk_path)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to save uploaded video file.")
+
+    if bytes_written == 0:
+        if os.path.exists(video_disk_path):
+            os.remove(video_disk_path)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded video file is empty (0 bytes).")
 
     # 4. Validate video container integrity with OpenCV
     cap = cv2.VideoCapture(video_disk_path)
@@ -315,7 +340,7 @@ async def analyze_video_deepfake_endpoint(
         )
 
     # 5. Execute neural spatio-temporal video inference (offloaded to threadpool)
-    prune_old_uploads(videos_dir, max_files=50)
+    prune_old_uploads(videos_dir, max_files=50, db=db)
     try:
         result = await run_in_threadpool(
             video_deepfake_service.analyze_video,
@@ -462,13 +487,28 @@ def get_video_deepfake_result_detail(record_id: int, db: Session = Depends(get_d
 
 @router.delete("/videos/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_video_deepfake_result(record_id: int, db: Session = Depends(get_db)):
-    """Deletes video deepfake analysis result from history."""
+    """Deletes video deepfake analysis result from history and removes associated files from disk."""
     record = db.query(VideoDeepfakeRecord).filter(VideoDeepfakeRecord.id == record_id).first()
     if not record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Video deepfake inspection result #{record_id} not found."
         )
+
+    # Clean up associated video and heatmap files from disk
+    for rel_path in [record.video_url, record.heatmap_url]:
+        if rel_path:
+            candidate = rel_path.lstrip("/")
+            full_path = os.path.join(UPLOAD_DIR, candidate.replace("uploads/", "").replace("uploads\\", ""))
+            if not os.path.isfile(full_path):
+                full_path = candidate
+            try:
+                if os.path.isfile(full_path):
+                    os.remove(full_path)
+                    logger.info(f"Deleted file: {full_path}")
+            except Exception as e:
+                logger.warning(f"Could not delete file {full_path}: {e}")
+
     db.delete(record)
     db.commit()
     return None

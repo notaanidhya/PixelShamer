@@ -4,6 +4,7 @@ import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, Query, Header, status
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 from PIL import Image
 
 from backend.app.db.session import get_db
@@ -104,7 +105,8 @@ async def analyze_image_endpoint(
 
     # 5. Execute Live AI / CV Inference Pipeline for Custom Uploads
     try:
-        result = inference_service.analyze_image(
+        result = await run_in_threadpool(
+            inference_service.analyze_image,
             image_bytes=content,
             original_filename=filename,
             upload_dir=UPLOAD_DIR
@@ -292,13 +294,28 @@ def get_result_detail(record_id: int, db: Session = Depends(get_db)):
 
 @router.delete("/results/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_result(record_id: int, db: Session = Depends(get_db)):
-    """Deletes an analysis result from history."""
+    """Deletes an analysis result from history and removes associated files from disk."""
     record = db.query(AnalysisRecord).filter(AnalysisRecord.id == record_id).first()
     if not record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Analysis result with ID {record_id} not found."
         )
+
+    # Clean up associated files from disk to prevent storage bloat
+    for rel_path in [record.stored_filename, record.heatmap_url]:
+        if rel_path:
+            candidate = rel_path.lstrip("/")
+            full_path = os.path.join(UPLOAD_DIR, candidate.replace("uploads/", "").replace("uploads\\", ""))
+            if not os.path.isfile(full_path):
+                full_path = candidate
+            try:
+                if os.path.isfile(full_path):
+                    os.remove(full_path)
+                    logger.info(f"Deleted file: {full_path}")
+            except Exception as e:
+                logger.warning(f"Could not delete file {full_path}: {e}")
+
     db.delete(record)
     db.commit()
     return None
