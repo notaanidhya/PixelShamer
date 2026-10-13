@@ -22,7 +22,7 @@ PixelShamer resolves this dilemma by unifying physics-based deterministic signal
 - Frame-by-Frame Temporal Anomaly Timeline: Computes independent anomaly scores across all 16 keyframes, pinpoints the peak anomaly timestamp down to the exact millisecond, and synchronizes with an interactive video scrubber.
 - Peak-Anomaly Grad-CAM Explainability: Automatically hooks into the terminal convolutional head of the spatial vision backbone to backpropagate gradients on the peak anomalous frame, generating a high-resolution Jet colormap spatial overlay highlighting synthetic boundary seams, warping artifacts, and blend lines.
 - Static Portrait Deepfake Detection: Fast single-image inference via an upgraded EfficientNet backbone (288x288 / 260x260 resolution, 2048-dimensional feature representation) with context-aware peripheral boundary seam protection and graceful fallback for non-facial imagery.
-- Eyewear Bias and Smartphone ISP Remediation: Decouples high-contrast glasses rims and smartphone unsharp-masking halos from generative forgery using 22 deterministic spectral and texture metrics (Immerkär noise variance, 2D-FFT Nyquist frequency ratios, GLCM statistics).
+- Eyewear Bias and Smartphone ISP Remediation: Decouples high-contrast glasses rims and smartphone unsharp-masking halos from generative forgery using 22 deterministic spectral and texture metrics (Immerkaar noise variance, 2D-FFT Nyquist frequency ratios, GLCM statistics).
 - Physical Quality Assessment and Defect Triage: Computes 22 deterministic computer vision metrics, classifies 6 multi-label degradation families (blur, noise, underexposure, overexposure, JPEG corruption, physical defects) with calibrated severities, and localizes surface defects via an unsupervised 256x256 Convolutional Autoencoder.
 - Continuous Power-Exponential Defect Gating: Dynamically modulates defect detection thresholds based on autoencoder reconstruction residuals, preventing false alarms on textured surfaces while catching subtle scratches.
 - 101-Point PCHIP Monotonic Score Calibration: Maps raw composite quality penalties to a 0 to 100 Quality Index with guaranteed positive gradients (0.84 to 1.12), eliminating score plateaus.
@@ -46,82 +46,50 @@ The platform is deployed and publicly accessible across production cloud infrast
 
 ## System Architecture
 
+The diagram below outlines the dual-pipeline architecture of PixelShamer, demonstrating the parallel execution of the Spatio-Temporal Deepfake Engine and the Physical Quality & Defect Engine.
+
 ```mermaid
 flowchart TD
-    subgraph INGESTION["Input Ingestion & Validation Layer"]
-        RAW["Input Media (Image: JPG, PNG, WEBP | Video: MP4, AVI, MOV)"]
-        VAL["Validation Guard (PIL Verify, OpenCV Demux, Stream Integrity, Size Guard)"]
-        MODE{"Route Dispatcher"}
-        RAW --> VAL --> MODE
+    classDef input fill:#1e3a8a,stroke:#60a5fa,stroke-width:1px,color:#ffffff
+    classDef df fill:#581c87,stroke:#c084fc,stroke-width:1px,color:#ffffff
+    classDef qual fill:#14532d,stroke:#4ade80,stroke-width:1px,color:#ffffff
+    classDef store fill:#1c1917,stroke:#a8a29e,stroke-width:1px,color:#ffffff
+
+    subgraph S_INGEST["1. Ingestion & Validation"]
+        INP["Input Media: Images (JPG, PNG, WEBP) / Videos (MP4, AVI, MOV)"]:::input
+        VAL["Validation Guard: Header Integrity, OpenCV Stream Verification"]:::input
+        DISP{"Pipeline Route Dispatcher"}:::input
+        INP --> VAL --> DISP
     end
 
-    subgraph PIPELINE_DEEPFAKE["Pipeline 1: Deepfake Face Forgery Detection Engine"]
-        direction TB
-        subgraph V_EXTRACT["Keyframe & Facial Extraction"]
-            V_DEC["Uniform Temporal Sampler (16 Keyframes: t_k = k * D / 16)"]
-            V_ALIGN["Cascade Face Detector + 1.35x Peripheral Boundary Guard"]
-            V_DEC --> V_ALIGN
-        end
-
-        subgraph BACKBONE["Feature Extraction & Temporal Sequence Modeling"]
-            CNN["Spatial CNN Backbone: EfficientNet-B5 (2048-dim Embeddings)"]
-            PROJ["Projection Bottleneck: Linear(2048 -> 256) + LayerNorm + SiLU"]
-            LSTM["2-Layer Bidirectional LSTM (hidden=256, bidirectional=512)"]
-            ATTN["Temporal Self-Attention Pooling Head (Normalized Weights alpha_t)"]
-            CNN --> PROJ --> LSTM --> ATTN
-        end
-
-        subgraph HEADS["Dual Classification Heads & Decision Consensus"]
-            HEAD_CLIP["Clip Classifier Head: Linear(512 -> 128 -> 1)"]
-            HEAD_FRAME["Auxiliary Frame Head: Linear(512 -> 1) for 16-Frame Timeline"]
-            CONSENSUS["Multi-Factor Consensus: 0.60*P_clip + 0.30*P_top3 + 0.10*P_median"]
-            FF_VAL["Secondary Cross-Validator: FaceForensics++ c23 Model"]
-            CALIB_DF["Decision Calibration: Optimal Threshold Mapping"]
-            VERDICT_DF["Forensic Verdict: AUTHENTIC, SUSPICIOUS, or LIKELY_FAKE"]
-            ATTN --> HEAD_CLIP --> CONSENSUS
-            LSTM --> HEAD_FRAME --> CONSENSUS
-            CONSENSUS --> FF_VAL --> CALIB_DF --> VERDICT_DF
-        end
-
-        subgraph EXPLAIN_DF["Explainability & Diagnostics"]
-            PEAK["Peak Anomaly Timestamp Extraction (t_peak = argmax p_t)"]
-            GCAM["Grad-CAM Backpropagation on Terminal MBConv conv_head"]
-            SPEC_DF["22 Deterministic Spectral Features (2D-FFT, Immerkaar, DCT)"]
-            HEAD_FRAME --> PEAK --> GCAM
-        end
+    subgraph S_DEEPFAKE["2. Pipeline 1: Spatio-Temporal Deepfake Engine"]
+        DF1["16-Keyframe Uniform Sampler<br/>Cascade Face Detection + 1.35x Boundary Guard"]:::df
+        DF2["Spatial EfficientNet-B5 (2048-d)<br/>+ 2-Layer Bi-LSTM Sequence Modeling"]:::df
+        DF3["Temporal Attention Pooling Head<br/>+ Multi-Factor Consensus & FF++ c23 Cross-Check"]:::df
+        DF4["Forensic Output: Verdict Tier<br/>Peak Anomaly Timeline + Grad-CAM Heatmap"]:::df
+        DF1 --> DF2 --> DF3 --> DF4
     end
 
-    subgraph PIPELINE_QUALITY["Pipeline 2: Physical Quality & Defect Triage Engine"]
-        direction TB
-        FE22["Deterministic CV Feature Extractor (22 Metrics across 7 Families)"]
-        AE["Generative Convolutional Autoencoder (256x256 RGB, 4-Layer)"]
-        MLP["Multi-Head MLP Classifier (6 Independent Sigmoid Heads)"]
-        GATE["Continuous Power-Exponential Defect Gate: tau(eps) = 0.38 + 0.32*exp(-3.5*eps^1.5)"]
-        FUS["Differentiated Penalty Fusion Engine: 0.70*MLP + 0.30*AE"]
-        PCHIP["101-Point PCHIP Strictly Monotonic Calibrator (Slope: 0.84 to 1.12)"]
-        HM_QUAL["Spatial Anomaly MSE Residual Map (Jet Colormap Overlay)"]
-        LABEL_QUAL["Quality Index (0-100): ACCEPTABLE, DEGRADED, or DEFECTIVE"]
-
-        FE22 --> MLP --> FUS
-        AE --> HM_QUAL
-        AE --> GATE --> FUS
-        FUS --> PCHIP --> LABEL_QUAL
+    subgraph S_QUALITY["3. Pipeline 2: Physical Quality & Defect Engine"]
+        Q1["22 Deterministic CV Metrics<br/>Sharpness, Noise, Exposure, Texture, DCT"]:::qual
+        Q2["Multi-Head MLP (6 Degradations)<br/>+ 256x256 ConvAutoencoder Anomaly Residuals"]:::qual
+        Q3["Continuous Power-Exponential Gating<br/>+ Differentiated Penalty Matrix (0.70 MLP + 0.30 AE)"]:::qual
+        Q4["Quality Output: 0-100 Quality Index<br/>101-Point PCHIP Monotonic Calibration"]:::qual
+        Q1 --> Q2 --> Q3 --> Q4
     end
 
-    subgraph STORAGE["Persistence & Presentation Tier"]
-        DB[("PostgreSQL 16 / SQLite Database (Audit Trail, Metadata, Timelines)")]
-        UI["React 18 Dual-Mode Workbench (Video Scrubbing, 3-Mode Spatial Viewport)"]
+    DISP -->|"Video / Portrait Forensics"| DF1
+    DISP -->|"Quality & Defect Triage"| Q1
+
+    subgraph S_OUTPUT["4. Persistence & Presentation"]
+        DB[("PostgreSQL 16 / SQLite<br/>Audit Trail, Metadata & Timelines")]:::store
+        UI["React 18 Inspection Workbench<br/>16-Frame Video Scrubbing + 3-Mode Spatial Viewport"]:::store
     end
 
-    MODE -->|"Video Upload or Deepfake Mode"| V_EXTRACT
-    V_ALIGN --> BACKBONE
-    MODE -->|"Image Quality Mode"| FE22
-    MODE -->|"Image Quality Mode"| AE
-
-    VERDICT_DF --> DB
-    LABEL_QUAL --> DB
-    GCAM --> UI
-    HM_QUAL --> UI
+    DF4 --> DB
+    Q4 --> DB
+    DF4 --> UI
+    Q4 --> UI
     DB --> UI
 ```
 
@@ -134,51 +102,105 @@ flowchart TD
 #### Spatio-Temporal Video Deepfake Engine (`DeepfakeVideoModel`)
 Static frame-level detectors fail on real-world video deepfakes because they ignore temporal incoherence, facial fluttering, and boundary jitter. PixelShamer implements a decoupled two-stage spatio-temporal architecture:
 
-1. Uniform Keyframe Extraction: For an uploaded video clip $V$ of duration $D$ and frame count $N$, exactly 16 uniform keyframes are decoded:
-   $$t_k = k \cdot \frac{D}{16}, \quad k \in \{0, 1, \dots, 15\}$$
-2. Facial Normalization and Boundary Guard: Each frame passes through face localization. Square-ish close-up portraits preserve full peripheral context. Environmental scenes apply a 1.35x margin expansion to ensure jawline, chin, and forehead boundaries are captured.
-3. Spatial Feature Representation: A frozen EfficientNet-B5 convolutional backbone processes the tensor sequence $x \in \mathbb{R}^{B \times 16 \times 3 \times 288 \times 288}$, extracting 2048-dimensional feature vectors per frame:
-   $$\mathbf{f}_t = \text{SpatialPool}(\text{EfficientNet}(\mathbf{x}_t)) \in \mathbb{R}^{2048}$$
-4. Regularized Projection Bottleneck: Projects high-dimensional spatial embeddings into a regularized sequence space:
-   $$\mathbf{z}_t = \text{Dropout}_{0.35}(\text{SiLU}(\text{LayerNorm}(\mathbf{W}_{\text{proj}} \mathbf{f}_t + \mathbf{b}_{\text{proj}}))) \in \mathbb{R}^{256}$$
-5. Bidirectional Recurrent Modeling: A 2-layer Bidirectional LSTM processes the sequence forward and backward:
-   $$\overrightarrow{\mathbf{h}}_t = \text{LSTM}_{\text{fwd}}(\mathbf{z}_t, \overrightarrow{\mathbf{h}}_{t-1}), \quad \overleftarrow{\mathbf{h}}_t = \text{LSTM}_{\text{bwd}}(\mathbf{z}_t, \overleftarrow{\mathbf{h}}_{t+1})$$
-   $$\mathbf{h}_t = [\overrightarrow{\mathbf{h}}_t \,\|\, \overleftarrow{\mathbf{h}}_t] \in \mathbb{R}^{512}$$
-6. Temporal Self-Attention Pooling: Rather than flat average pooling, an attention sub-network evaluates the relative anomaly significance of each frame:
-   $$e_t = \mathbf{w}_a^T \tanh(\mathbf{W}_a \mathbf{h}_t + \mathbf{b}_a), \quad \alpha_t = \frac{\exp(e_t)}{\sum_{j=1}^{16} \exp(e_j)}$$
-   $$\mathbf{c} = \sum_{t=1}^{16} \alpha_t \mathbf{h}_t \in \mathbb{R}^{512}$$
-   This allows brief 1-to-2 frame synthesis glitches to dominate the sequence representation rather than being diluted by 14 normal frames.
-7. Dual Output Heads:
-   - Sequence Clip Classifier: $\text{Linear}(512 \to 128) \to \text{ReLU} \to \text{Dropout}(0.4) \to \text{Linear}(128 \to 1) \to \text{Sigmoid}$.
-   - Auxiliary Frame Classifier: $\text{Linear}(512 \to 1) \to \text{Sigmoid}$, generating the 16-point anomaly timeline array.
+##### Stage 1: Uniform Keyframe Extraction
+For an uploaded video clip `V` of total duration `D` seconds and frame count `N`, exactly 16 uniform keyframes are decoded at sampling timestamps `t_k`:
+
+```math
+t_k = k \cdot \frac{D}{16}, \quad k \in \{0, 1, 2, \dots, 15\}
+```
+
+##### Stage 2: Facial Normalization and Boundary Guard
+Each frame passes through cascade face localization. Square-ish close-up portraits preserve full peripheral context. Environmental captures apply a 1.35x margin expansion to ensure jawline, chin, and forehead boundaries are preserved rather than clipped.
+
+##### Stage 3: Spatial Feature Representation
+A frozen EfficientNet-B5 convolutional backbone processes the tensor sequence `x` of shape `[Batch, 16, 3, 288, 288]`, extracting a 2048-dimensional feature embedding per keyframe:
+
+```math
+\mathbf{f}_t = \text{SpatialPool}(\text{EfficientNet}(\mathbf{x}_t)) \in \mathbb{R}^{2048}
+```
+
+##### Stage 4: Regularized Projection Bottleneck
+High-dimensional spatial embeddings are projected into a regularized sequence representation to prevent overfitting:
+
+```math
+\mathbf{z}_t = \text{Dropout}_{0.35}(\text{SiLU}(\text{LayerNorm}(\mathbf{W}_{\text{proj}} \mathbf{f}_t + \mathbf{b}_{\text{proj}}))) \in \mathbb{R}^{256}
+```
+
+##### Stage 5: Bidirectional Recurrent Modeling
+A 2-layer Bidirectional LSTM processes the temporal sequence forward and backward to capture temporal transition anomalies:
+
+```math
+\overrightarrow{\mathbf{h}}_t = \text{LSTM}_{\text{fwd}}(\mathbf{z}_t, \overrightarrow{\mathbf{h}}_{t-1}), \quad \overleftarrow{\mathbf{h}}_t = \text{LSTM}_{\text{bwd}}(\mathbf{z}_t, \overleftarrow{\mathbf{h}}_{t+1})
+```
+
+```math
+\mathbf{h}_t = [\overrightarrow{\mathbf{h}}_t \,\|\, \overleftarrow{\mathbf{h}}_t] \in \mathbb{R}^{512}
+```
+
+##### Stage 6: Temporal Self-Attention Pooling
+Rather than flat average pooling, an attention sub-network evaluates the relative anomaly significance of each frame:
+
+```math
+e_t = \mathbf{w}_a^T \tanh(\mathbf{W}_a \mathbf{h}_t + \mathbf{b}_a), \quad \alpha_t = \frac{\exp(e_t)}{\sum_{j=1}^{16} \exp(e_j)}
+```
+
+```math
+\mathbf{c} = \sum_{t=1}^{16} \alpha_t \mathbf{h}_t \in \mathbb{R}^{512}
+```
+
+This ensures that brief 1-to-2 frame synthesis glitches dominate the sequence representation rather than being diluted by surrounding normal frames.
+
+##### Stage 7: Dual Output Classification Heads
+- Sequence Clip Classifier: Maps pooled context `c` through `Linear(512 -> 128) -> ReLU -> Dropout(0.4) -> Linear(128 -> 1) -> Sigmoid` to obtain clip probability `P_clip`.
+- Auxiliary Frame Classifier: Maps individual hidden states `h_t` through `Linear(512 -> 1) -> Sigmoid` to generate the 16-point anomaly timeline array `p_t`.
+
+---
 
 #### Multi-Objective Training Loss
 The video model is trained under a composite objective combining clip supervision, auxiliary frame supervision, and an inter-frame smoothness regularization term:
-$$\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{clip}} + 0.30 \cdot \mathcal{L}_{\text{frame}} + 0.10 \cdot \mathcal{L}_{\text{smoothness}}$$
+
+```math
+\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{clip}} + 0.30 \cdot \mathcal{L}_{\text{frame}} + 0.10 \cdot \mathcal{L}_{\text{smoothness}}
+```
+
 Where the smoothness penalty enforces temporal coherence across adjacent keyframe probabilities:
-$$\mathcal{L}_{\text{smoothness}} = \frac{1}{15} \sum_{t=1}^{15} (p_{t+1} - p_t)^2$$
+
+```math
+\mathcal{L}_{\text{smoothness}} = \frac{1}{15} \sum_{t=1}^{15} (p_{t+1} - p_t)^2
+```
+
+---
 
 #### Multi-Factor Consensus Engine
 At inference time, PixelShamer avoids relying on a single raw score. It combines three statistical estimators:
-$$S_{\text{raw}} = 0.60 \cdot P_{\text{clip}} + 0.30 \cdot \left(\frac{1}{3} \sum_{i=1}^3 P_{\text{top-}i}\right) + 0.10 \cdot \text{median}(P_{\text{frame}})$$
-- $P_{\text{clip}}$: Global Bi-LSTM sequence prediction.
-- Top-3 Average: Captures transient localized face swaps or momentary head-turn glitches.
+
+```math
+S_{\text{raw}} = 0.60 \cdot P_{\text{clip}} + 0.30 \cdot \left(\frac{1}{3} \sum_{i=1}^3 P_{\text{top-}i}\right) + 0.10 \cdot \text{median}(P_{\text{frame}})
+```
+
+- `P_clip`: Global Bi-LSTM sequence prediction.
+- Top-3 Frame Average: Captures transient localized face swaps or momentary head-turn glitches.
 - Median: Robust baseline preventing single-frame sensor noise from causing false alarms.
 
-The raw consensus is then non-linearly mapped against the optimal separation threshold $\tau$:
-$$P_{\text{calib}} = \begin{cases} 
+The raw consensus score is then non-linearly mapped against the optimal separation threshold `tau`:
+
+```math
+P_{\text{calib}} = \begin{cases} 
 0.50 + 0.50 \cdot \frac{S_{\text{raw}} - \tau}{1.0 - \tau} & \text{if } S_{\text{raw}} \ge \tau \\
 0.50 \cdot \frac{S_{\text{raw}}}{\tau} & \text{if } S_{\text{raw}} < \tau
-\end{cases}$$
+\end{cases}
+```
+
+---
 
 #### Dual-Model Secondary Cross-Validation
-To prevent cross-generator overfitting, the engine embeds a secondary validator trained on FaceForensics++ c23 (`deepfake_video_ff_c23.pt`). If the primary model yields a borderline score ($0.35 \le P < 0.60$), the secondary model evaluates the same tensor sequence to confirm or overturn the verdict.
+To prevent cross-generator overfitting, the engine embeds a secondary validator trained on FaceForensics++ c23 (`deepfake_video_ff_c23.pt`). If the primary model yields a borderline score in the suspicious range (`0.35 <= P < 0.60`), the secondary model evaluates the same tensor sequence to confirm or overturn the verdict.
 
 ---
 
 ### 2. Comprehensive Deepfake Benchmark Results and Scores
 
-#### Spatio-Temporal Video Deepfake Benchmark (Celeb-DF v2 / Multi-Frame Dataset)
+#### Spatio-Temporal Video Deepfake Benchmark (Celeb-DF v2 / Multi-Frame Protocol)
 Evaluated across balanced multi-frame manipulation video sequences:
 
 | Metric | Video Engine Score | Benchmark Significance |
@@ -229,6 +251,18 @@ Evaluated on 2,041 curated high-resolution facial portraits (1,080 authentic, 96
 | Inference Latency (GPU) | 24.6 ms | Per portrait on NVIDIA RTX 3050 4GB |
 | Inference Latency (CPU) | 44.8 ms | Per portrait on AMD Ryzen 7 5800H |
 
+#### Static Model Training Progression (EfficientNet-B5 Checkpoint)
+Training progression across 6 fine-tuning epochs:
+
+| Epoch | Train Loss | Validation Loss | Validation Accuracy | Validation ROC-AUC | Optimal Threshold | Optimal Val F1 | Learning Rate |
+|---|---|---|---|---|---|---|---|
+| Epoch 1 | 0.6678 | 0.6030 | 67.16% | 0.7691 | 0.400 | 0.7130 | 2.34e-04 |
+| Epoch 2 | 0.4719 | 0.5337 | 75.00% | 0.8214 | 0.350 | 0.7743 | 1.90e-04 |
+| Epoch 3 | 0.2901 | 0.6102 | 73.04% | 0.8164 | 0.640 | 0.7610 | 1.30e-04 |
+| Epoch 4 | 0.1988 | 0.5284 | 77.94% | 0.8492 | 0.580 | 0.7870 | 7.00e-05 |
+| Epoch 5 | 0.1443 | 0.5790 | 76.96% | 0.8290 | 0.440 | 0.7656 | 2.61e-05 |
+| Epoch 6 | 0.1111 | 0.5633 | 75.00% | 0.8383 | 0.630 | 0.7731 | 1.00e-05 |
+
 #### Performance Across Forgery Difficulty Tiers (CIPLab Protocol)
 
 | Sub-Category / Partition | Number of Samples | Accuracy (%) | Mean Model Confidence | Qualitative Forensic Characteristics |
@@ -276,9 +310,9 @@ PixelShamer's Remediation Architecture:
 1. Anti-Aliasing Downsampling: Replaced standard bilinear interpolation with area-averaging (`cv2.INTER_AREA`) and pre-filtering on captures exceeding 1000px.
 2. Parallel Spectral Metric Decoupling: In parallel with neural inference, the engine computes:
    - Nyquist Frequency Ratio (`fft_high_freq_ratio`): Decouples optical defocus from GAN spectral decay.
-   - Immerkär Noise Sigma (`noise_sigma_immerkaar`): Verifies whether noise is spatially uniform across the face (authentic camera sensor) or differs between patches (spliced forgery).
+   - Immerkaar Noise Sigma (`noise_sigma_immerkaar`): Verifies whether noise is spatially uniform across the face (authentic camera sensor) or differs between patches (spliced forgery).
    - DCT Blockiness (`dct_blockiness`): Detects lossy compression boundary steps.
-3. Ocular Energy Gating: If Grad-CAM activations concentrate entirely within the eyeglass horizontal zone ($y \in [0.28, 0.55]$) but sensor noise variance is uniform ($\sigma < 2.5$), the engine suppresses false alarms.
+3. Ocular Energy Gating: If Grad-CAM activations concentrate entirely within the eyeglass horizontal zone (`y` in `[0.28, 0.55]`) but sensor noise variance is uniform (`sigma < 2.5`), the engine suppresses false alarms.
 
 ---
 
@@ -286,9 +320,9 @@ PixelShamer's Remediation Architecture:
 
 | Verdict Tier | Calibrated Score Range | Visual and Physical Criteria | Recommended Action |
 |---|---|---|---|
-| `AUTHENTIC` | $P < 0.35$ (Image) / $P < 0.35$ (Video) | Continuous biomechanical motion, natural skin pore distribution, symmetric corneal reflections, uniform Immerkär sensor noise, coherent inter-frame transitions. | Automated verification pass; no human intervention needed. |
-| `SUSPICIOUS` | $0.35 \le P < 0.65$ (Image) / $0.35 \le P < 0.60$ (Video) | Borderline facial frequency anomalies, subtle blending inconsistencies along jawline or hairline, minor temporal landmark jitter. | Flagged for secondary human inspection; invoke 16-frame timeline review. |
-| `LIKELY_FAKE` | $P \ge 0.65$ (Image) / $P \ge 0.60$ (Video) | High neural synthesis activation, boundary gradient mismatches, Poisson blending seam anomalies, temporal flicker, or high-confidence face-swap signatures. | Immediate forensic escalation; inspect peak Grad-CAM heatmap. |
+| `AUTHENTIC` | P < 0.35 (Image) / P < 0.35 (Video) | Continuous biomechanical motion, natural skin pore distribution, symmetric corneal reflections, uniform Immerkaar sensor noise, coherent inter-frame transitions. | Automated verification pass; no human intervention needed. |
+| `SUSPICIOUS` | 0.35 <= P < 0.65 (Image) / 0.35 <= P < 0.60 (Video) | Borderline facial frequency anomalies, subtle blending inconsistencies along jawline or hairline, minor temporal landmark jitter. | Flagged for secondary human inspection; invoke 16-frame timeline review. |
+| `LIKELY_FAKE` | P >= 0.65 (Image) / P >= 0.60 (Video) | High neural synthesis activation, boundary gradient mismatches, Poisson blending seam anomalies, temporal flicker, or high-confidence face-swap signatures. | Immediate forensic escalation; inspect peak Grad-CAM heatmap. |
 | `NOT_DETECTED` | Face confidence = 0.0 | No frontal human face detected by OpenCV Haar cascade detectors. Prevents out-of-distribution hallucinations on scenery or inanimate objects. | Prompt user to upload a clear face portrait. |
 
 ---
@@ -300,15 +334,15 @@ The frontend web application provides forensic transparency through synchronized
 #### Video Deepfake Timeline Workbench (`VideoTimelineViewer.jsx` & `VideoDeepfakePanel.jsx`)
 - 16-Frame Temporal Anomaly Graph: Visualizes frame-by-frame anomaly probabilities as an interactive bar chart. Bars are color-coded (green for authentic, amber for suspicious, rose for likely fake).
 - Millisecond-Accurate Video Scrubbing: Clicking any bar on the timeline seeks the integrated HTML5 video player directly to that keyframe's exact millisecond timestamp.
-- Peak-Anomaly Frame Callout: Automatically flags the single frame with the highest anomaly score ($t_{\text{peak}} = \arg\max_t p_t$), displaying its timestamp, anomaly probability, and pre-rendered Grad-CAM overlay.
+- Peak-Anomaly Frame Callout: Automatically flags the single frame with the highest anomaly score (`t_peak = argmax_t(p_t)`), displaying its timestamp, anomaly probability, and pre-rendered Grad-CAM overlay.
 - JSON Audit Report Export: One-click export downloading the complete forensic audit payload (frame timestamps, probabilities, model metadata, and verdicts).
 
 #### Static Image Inspection Workbench (`ImageViewer.jsx` & `DeepfakePanel.jsx`)
 - Original Mode: Displays the full-resolution uploaded portrait without modification.
 - Overlay Mode: Blends the Jet colormap Grad-CAM activation map over the face crop with a smooth alpha-blend slider (default 35% opacity), isolating manipulation boundary seams.
 - Raw Heatmap Mode: Renders the unblended Jet colormap activation map directly from the terminal convolutional head (`conv_head`).
-- Face Localization Bounding Box: Visualizes the localized face crop coordinates and dimensions ($X, Y, W, H$).
-- Frequency Telemetry Readout: Exposes real-time numerical readings for FFT High Frequency Ratio, DCT Blockiness, Laplacian Variance, and Immerkär Noise Sigma.
+- Face Localization Bounding Box: Visualizes the localized face crop coordinates and dimensions (`X, Y, W, H`).
+- Frequency Telemetry Readout: Exposes real-time numerical readings for FFT High Frequency Ratio, DCT Blockiness, Laplacian Variance, and Immerkaar Noise Sigma.
 
 ---
 
@@ -322,25 +356,25 @@ All 22 features are derived deterministically from pixel values without black-bo
 
 | Family | Count | Feature Identifier | Mathematical Formulation and Physical Meaning |
 |---|---|---|---|
-| Sharpness | 4 | `laplacian_variance` | $\sigma^2(\nabla^2 I)$. Measures high-frequency edge variance. Drops sharply in defocus or motion blur. |
-| | | `tenengrad_mean` | $\frac{1}{N} \sum (G_x^2 + G_y^2)$. Sobel gradient magnitude measuring edge contrast. |
-| | | `fft_high_freq_ratio` | Energy ratio outside $0.5 \times f_{\text{Nyquist}}$ in 2D Fourier magnitude spectrum. |
-| | | `edge_density` | Ratio of Canny edge pixels ($T_{\text{low}}=50, T_{\text{high}}=150$) to total pixel count. |
-| Exposure | 4 | `mean_luminance` | Grayscale intensity via ITU-R BT.601: $Y = 0.299R + 0.587G + 0.114B$. |
-| | | `dark_pixel_ratio` | Fraction of pixels with luminance $< 15$. High values indicate severe underexposure. |
-| | | `bright_pixel_ratio` | Fraction of pixels with luminance $> 240$. High values indicate highlight blowout. |
+| Sharpness | 4 | `laplacian_variance` | `Var(Laplacian(I))`. Measures high-frequency edge variance. Drops sharply in defocus or motion blur. |
+| | | `tenengrad_mean` | `(1/N) * sum(G_x^2 + G_y^2)`. Sobel gradient magnitude measuring edge contrast. |
+| | | `fft_high_freq_ratio` | Energy ratio outside `0.5 * f_Nyquist` in 2D Fourier magnitude spectrum. |
+| | | `edge_density` | Ratio of Canny edge pixels (`T_low = 50, T_high = 150`) to total pixel count. |
+| Exposure | 4 | `mean_luminance` | Grayscale intensity via ITU-R BT.601: `Y = 0.299*R + 0.587*G + 0.114*B`. |
+| | | `dark_pixel_ratio` | Fraction of pixels with luminance `< 15`. High values indicate severe underexposure. |
+| | | `bright_pixel_ratio` | Fraction of pixels with luminance `> 240`. High values indicate highlight blowout. |
 | | | `histogram_skewness` | Third standardized moment of luminance distribution. |
 | Contrast | 2 | `rms_contrast` | Standard deviation of normalized pixel intensities. |
-| | | `michelson_contrast` | $(I_{\max} - I_{\min}) / (I_{\max} + I_{\min})$. |
-| Noise | 3 | `noise_sigma_immerkaar` | Immerkär fast Laplacian noise estimator using a 3x3 kernel mask: $\sigma = \frac{\sqrt{\pi/2}}{6(W-2)(H-2)} \sum |I * M|$. |
+| | | `michelson_contrast` | `(I_max - I_min) / (I_max + I_min)`. |
+| Noise | 3 | `noise_sigma_immerkaar` | Immerkaar fast Laplacian noise estimator using a 3x3 kernel mask: `sigma = (sqrt(pi/2) / (6*(W-2)*(H-2))) * sum(|I * M|)`. |
 | | | `flat_region_variance` | Minimum local variance across 16x16 sliding spatial windows. |
 | | | `snr_proxy` | Ratio of mean luminance to estimated noise standard deviation. |
-| Color | 3 | `mean_saturation` | Average $S$ channel in HSV representation. |
+| Color | 3 | `mean_saturation` | Average `S` channel in HSV representation. |
 | | | `channel_imbalance` | Standard deviation of mean channel intensities across RGB channels. |
 | | | `colorfulness` | Hasler and Suesstrunk metric combining RG and YB color opponency standard deviations. |
-| Texture | 3 | `glcm_contrast` | Gray-Level Co-occurrence Matrix contrast at offset $(1, 0)$: $\sum |i-j|^2 p(i,j)$. |
-| | | `glcm_homogeneity` | GLCM homogeneity: $\sum \frac{p(i,j)}{1 + |i-j|}$. |
-| | | `glcm_energy` | GLCM angular second moment: $\sum p(i,j)^2$. |
+| Texture | 3 | `glcm_contrast` | Gray-Level Co-occurrence Matrix contrast at offset `(1, 0)`: `sum(|i - j|^2 * p(i, j))`. |
+| | | `glcm_homogeneity` | GLCM homogeneity: `sum(p(i, j) / (1 + |i - j|))`. |
+| | | `glcm_energy` | GLCM angular second moment: `sum(p(i, j)^2)`. |
 | Corruption | 3 | `dct_blockiness` | Boundary discontinuity across 8x8 DCT grid edges, exposing JPEG compression artifacts. |
 | | | `hf_energy_loss` | High-frequency DCT coefficient attenuation. |
 | | | `compression_gradient` | Mean boundary gradient along 8x8 block perimeters. |
@@ -361,35 +395,55 @@ All 22 features are derived deterministically from pixel values without black-bo
 #### Model B: Generative Convolutional Autoencoder (256x256)
 - Trained strictly on pristine optical imagery with zero defects or degradations. Any abnormal surface pattern, crack, or synthetic artifact fails reconstruction.
 - Encoder: 4 blocks of `Conv2d(3 -> 32 -> 64 -> 128 -> 256)` with `InstanceNorm2d`, `LeakyReLU(0.2)`, and `MaxPool2d(2)`.
-- Bottleneck: $16 \times 16 \times 256$ latent representation.
+- Bottleneck: `16 x 16 x 256` latent representation.
 - Decoder: 4 blocks of `ConvTranspose2d(256 -> 128 -> 64 -> 32 -> 3)` with `InstanceNorm2d`, `ReLU`, and terminal `Sigmoid`.
 - Spatial Anomaly Residual Map: Pixel-wise MSE residual:
-  $$E(x, y) = \frac{1}{3} \sum_{c=1}^3 (I_c(x, y) - \hat{I}_c(x, y))^2$$
+
+```math
+E(x, y) = \frac{1}{3} \sum_{c=1}^3 (I_c(x, y) - \hat{I}_c(x, y))^2
+```
 
 ---
 
 ### 3. Decision Fusion and Quality Score Derivation
 
-1. Catastrophic Loss Gate:
-   If $(\mu_Y < 3.0 \land D_{\text{dark}} > 0.98)$ or $(\mu_Y > 252.0 \land B_{\text{bright}} > 0.98)$, score is immediately set to 5.0 (`DEFECTIVE`).
-2. Continuous Power-Exponential Defect Gate:
-   The defect trigger threshold adapts continuously as a function of normalized reconstruction residual error $\epsilon$:
-   $$\tau_{\text{defect}}(\epsilon) = 0.38 + 0.32 \cdot \exp(-3.5 \cdot \epsilon^{1.5})$$
-   Smoothly decays from 0.70 at zero reconstruction error down to 0.38 on high anomalies, preventing false alarms on textured surfaces.
-3. Differentiated Penalty Matrix:
-   Penalties reflect human perceptual impact:
-   - Defocus Blur: None: 0 | Low: 8 | Medium: 22 | High: 42
-   - Underexposure: None: 0 | Low: 10 | Medium: 26 | High: 48
-   - Overexposure: None: 0 | Low: 10 | Medium: 26 | High: 48
-   - Sensor Noise: None: 0 | Low: 5 | Medium: 14 | High: 30
-   - JPEG Corruption: None: 0 | Low: 8 | Medium: 22 | High: 40
-   - Physical Defect: None: 0 | Low: 25 | Medium: 45 | High: 65
-4. Diminishing Multi-Issue Compounding:
-   $$\text{Total MLP Penalty} = P_1 + 0.70 \cdot P_2 + 0.50 \cdot P_3 + \dots \quad (P_1 \ge P_2 \ge P_3)$$
-   $$\text{Total Composite Penalty} = 0.70 \cdot \text{Penalty}_{\text{MLP}} + 0.30 \cdot \text{Penalty}_{\text{AE}}$$
-   $$\text{Raw Score} = \text{clip}(100.0 - \text{Total Composite Penalty}, 0, 100)$$
-5. 101-Point PCHIP Monotonic Calibration:
-   The raw score passes through a 101-point Piecewise Cubic Hermite Interpolating Polynomial spline. Derivatives are strictly positive everywhere ($0.84 \le d/dx \le 1.12$), eliminating zero-gradient flat steps produced by standard isotonic regression.
+#### Stage 1: Catastrophic Loss Gate
+If `(mean_luminance < 3.0 and dark_pixel_ratio > 0.98)` or `(mean_luminance > 252.0 and bright_pixel_ratio > 0.98)`, the score is immediately clamped to `5.0` with a `DEFECTIVE` label.
+
+#### Stage 2: Continuous Power-Exponential Defect Gate
+The defect trigger threshold adapts continuously as a function of the autoencoder's normalized reconstruction residual error:
+
+```math
+\tau_{\text{defect}}(\epsilon) = 0.38 + 0.32 \cdot \exp(-3.5 \cdot \epsilon^{1.5})
+```
+
+This function decays smoothly from 0.70 at zero reconstruction error (imposing a high detection bar on clean imagery) down to 0.38 on high reconstruction errors (lowering the trigger threshold on genuine anomalies).
+
+#### Stage 3: Differentiated Penalty Matrix and Diminishing Compounding
+Perceptually graded penalties reflecting human visual degradation severity:
+- Defocus Blur: None: 0 | Low: 8 | Medium: 22 | High: 42
+- Underexposure: None: 0 | Low: 10 | Medium: 26 | High: 48
+- Overexposure: None: 0 | Low: 10 | Medium: 26 | High: 48
+- Sensor Noise: None: 0 | Low: 5 | Medium: 14 | High: 30
+- JPEG Corruption: None: 0 | Low: 8 | Medium: 22 | High: 40
+- Physical Defect: None: 0 | Low: 25 | Medium: 45 | High: 65
+
+Multi-issue penalties are compounded with diminishing returns where `P1 >= P2 >= P3 ...`:
+
+```math
+\text{Total MLP Penalty} = P_1 + 0.70 \cdot P_2 + 0.50 \cdot P_3 + \dots
+```
+
+```math
+\text{Total Composite Penalty} = 0.70 \cdot \text{Penalty}_{\text{MLP}} + 0.30 \cdot \text{Penalty}_{\text{AE}}
+```
+
+```math
+\text{Raw Score} = \text{clip}(100.0 - \text{Total Composite Penalty}, 0, 100)
+```
+
+#### Stage 4: 101-Point PCHIP Monotonic Calibration
+The raw score passes through a 101-point Piecewise Cubic Hermite Interpolating Polynomial spline. Derivatives are strictly positive everywhere (`0.84 <= d/dx <= 1.12`), completely eliminating zero-gradient flat steps produced by standard isotonic regression.
 
 Label Thresholds:
 - `ACCEPTABLE`: Calibrated Score >= 75.0
@@ -427,6 +481,10 @@ Label Thresholds:
 | Defocus Blur | 0.914 | 84.0% | 0.563 | 0.871 | 0.684 |
 | JPEG Corruption | 0.805 | 88.4% | 0.801 | 0.504 | 0.619 |
 | Physical Defect | 0.605 | 72.4% | 0.308 | 0.379 | 0.340 |
+
+- Quality Score MAE (1,280 images): 15.96 points
+- Pearson Correlation (r): 0.536
+- Pristine Reference Mean Score (200 clean images): 80.4 / 100
 
 ---
 
@@ -537,7 +595,7 @@ Benchmarked on standard workstation hardware (NVIDIA GeForce RTX 3050 4GB Laptop
 |-- docs/
 |   |-- project_report.md               Comprehensive engineering and architecture report
 |   |-- DeepGuard_Capstone_Phase_1_Upgraded_Report.md Capstone academic defense report
-|   |-- MODEL_LIMITATIONS_AND_LITERATURE_REVIEW.md Critical review of academic models vs PixelShamer
+|   |-- MODEL_LIMITATIONS_AND_LITERATURE_REVIEW.md Academic Literature Review & Comparative Analysis
 |   |-- deepfake_false_positive_analysis.md Forensic report on eyewear and ISP bias remediation
 |   |-- evaluation_report.md            Quality evaluation confusion matrices and analysis
 |   |-- screenshots/                    Workbench screenshots and diagnostic profiles
@@ -757,8 +815,8 @@ curl -X DELETE "https://pixelshamer-api.onrender.com/api/results/105"
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/your-username/pixelshamer.git
-cd pixelshamer
+git clone https://github.com/notaanidhya/PixelShamer.git
+cd PixelShamer
 ```
 
 ### 2. Backend Setup
