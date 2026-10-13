@@ -46,51 +46,62 @@ The platform is deployed and publicly accessible across production cloud infrast
 
 ## System Architecture
 
-The diagram below outlines the dual-pipeline architecture of PixelShamer, demonstrating the parallel execution of the Spatio-Temporal Deepfake Engine and the Physical Quality & Defect Engine.
+The PixelShamer dual-pipeline architecture runs entirely on local hardware, routing inputs to either the Spatio-Temporal Deepfake Forensics Pipeline or the Physical Quality & Defect Triage Pipeline.
+
+```
++-------------------------------------------------------------------------------------------------------------------------+
+|                                    PIXELSHAMER UNIFIED DUAL-PIPELINE ARCHITECTURE                                       |
++-------------------------------------------------------------------------------------------------------------------------+
+|                                        [ Input Media: Image / Video Stream ]                                            |
+|                                                          |                                                              |
+|                                        [ Validation Guard & Route Dispatch ]                                            |
+|                                        /                                   \                                            |
+|                  (Video / Portrait Mode)                                   (Quality Mode)                               |
+|                            |                                                     |                                      |
+|    +-----------------------------------------------+     +-----------------------------------------------+              |
+|    | PIPELINE 1: SPATIO-TEMPORAL DEEPFAKE FORENSICS |     | PIPELINE 2: PHYSICAL QUALITY & DEFECT TRIAGE  |              |
+|    +-----------------------------------------------+     +-----------------------------------------------+              |
+|    | 1. Uniform 16-Keyframe Extraction (t_k)       |     | 1. 22 Deterministic Signal Metrics (CV)       |              |
+|    | 2. Face Localization + 1.35x Boundary Guard   |     |    (Sharpness, Noise, Exposure, Texture, DCT) |              |
+|    | 3. EfficientNet-B5 Backbone (2048-d)          |     | 2. Multi-Head MLP Classifier (6 Issues)       |              |
+|    | 4. Regularized Projection Bottleneck (256-d)  |     | 3. Generative ConvAutoencoder (256x256)       |              |
+|    | 5. 2-Layer Bidirectional LSTM Sequence Model  |     | 4. Power-Exponential Defect Gating (tau_eps)  |              |
+|    | 6. Temporal Self-Attention Pooling Head       |     | 5. Differentiated Penalty Matrix (0.70 / 0.30)|              |
+|    | 7. Multi-Factor Consensus & FF++ Cross-Check  |     | 6. 101-Point PCHIP Monotonic Score Spline     |              |
+|    | 8. Peak-Anomaly Grad-CAM Heatmap Localization |     | 7. MSE Residual Spatial Heatmap (Jet Overlay) |              |
+|    +-----------------------------------------------+     +-----------------------------------------------+              |
+|                            \                                                     /                                      |
+|                             \                                                   /                                       |
+|                              v                                                 v                                        |
+|    +-------------------------------------------------------------------------------------------------------------+      |
+|    | PERSISTENCE & PRESENTATION LAYER: Neon PostgreSQL 16 + React 18 Dual-Mode Workbench                         |      |
+|    | [16-Frame Millisecond Video Scrubbing] [3-Mode Spatial Viewport] [Telemetry Grid] [Forensic JSON Export]    |      |
+|    +-------------------------------------------------------------------------------------------------------------+      |
++-------------------------------------------------------------------------------------------------------------------------+
+```
 
 ```mermaid
-flowchart TD
-    classDef input fill:#1e3a8a,stroke:#60a5fa,stroke-width:1px,color:#ffffff
-    classDef df fill:#581c87,stroke:#c084fc,stroke-width:1px,color:#ffffff
-    classDef qual fill:#14532d,stroke:#4ade80,stroke-width:1px,color:#ffffff
-    classDef store fill:#1c1917,stroke:#a8a29e,stroke-width:1px,color:#ffffff
+graph LR
+    classDef in fill:#1e3a8a,stroke:#60a5fa,color:#ffffff
+    classDef df fill:#4c1d95,stroke:#c084fc,color:#ffffff
+    classDef qual fill:#14532d,stroke:#4ade80,color:#ffffff
+    classDef store fill:#1c1917,stroke:#a8a29e,color:#ffffff
 
-    subgraph S_INGEST["1. Ingestion & Validation"]
-        INP["Input Media: Images (JPG, PNG, WEBP) / Videos (MP4, AVI, MOV)"]:::input
-        VAL["Validation Guard: Header Integrity, OpenCV Stream Verification"]:::input
-        DISP{"Pipeline Route Dispatcher"}:::input
-        INP --> VAL --> DISP
+    INP["Input Media<br/>Image / Video"]:::in --> DISP{"Dispatcher"}:::in
+
+    subgraph DEEPFAKE["Pipeline 1: Deepfake Forensics"]
+        DF1["16-Keyframe Extraction<br/>1.35x Face Guard"]:::df --> DF2["EfficientNet-B5<br/>+ 2-Layer Bi-LSTM"]:::df --> DF3["Attention Pooling<br/>+ Consensus Engine"]:::df --> DF4["Verdict & Grad-CAM<br/>Peak Timeline"]:::df
     end
 
-    subgraph S_DEEPFAKE["2. Pipeline 1: Spatio-Temporal Deepfake Engine"]
-        DF1["16-Keyframe Uniform Sampler<br/>Cascade Face Detection + 1.35x Boundary Guard"]:::df
-        DF2["Spatial EfficientNet-B5 (2048-d)<br/>+ 2-Layer Bi-LSTM Sequence Modeling"]:::df
-        DF3["Temporal Attention Pooling Head<br/>+ Multi-Factor Consensus & FF++ c23 Cross-Check"]:::df
-        DF4["Forensic Output: Verdict Tier<br/>Peak Anomaly Timeline + Grad-CAM Heatmap"]:::df
-        DF1 --> DF2 --> DF3 --> DF4
+    subgraph QUALITY["Pipeline 2: Physical Quality & Defect Engine"]
+        Q1["22 CV Metrics<br/>Sharpness, Noise, DCT"]:::ql --> Q2["Multi-Head MLP<br/>+ ConvAutoencoder"]:::ql --> Q3["Power-Exponential Gate<br/>+ Penalty Matrix"]:::ql --> Q4["Quality Index (0-100)<br/>PCHIP Calibrated"]:::ql
     end
 
-    subgraph S_QUALITY["3. Pipeline 2: Physical Quality & Defect Engine"]
-        Q1["22 Deterministic CV Metrics<br/>Sharpness, Noise, Exposure, Texture, DCT"]:::qual
-        Q2["Multi-Head MLP (6 Degradations)<br/>+ 256x256 ConvAutoencoder Anomaly Residuals"]:::qual
-        Q3["Continuous Power-Exponential Gating<br/>+ Differentiated Penalty Matrix (0.70 MLP + 0.30 AE)"]:::qual
-        Q4["Quality Output: 0-100 Quality Index<br/>101-Point PCHIP Monotonic Calibration"]:::qual
-        Q1 --> Q2 --> Q3 --> Q4
-    end
+    DISP -->|"Video / Portrait"| DF1
+    DISP -->|"Quality Mode"| Q1
 
-    DISP -->|"Video / Portrait Forensics"| DF1
-    DISP -->|"Quality & Defect Triage"| Q1
-
-    subgraph S_OUTPUT["4. Persistence & Presentation"]
-        DB[("PostgreSQL 16 / SQLite<br/>Audit Trail, Metadata & Timelines")]:::store
-        UI["React 18 Inspection Workbench<br/>16-Frame Video Scrubbing + 3-Mode Spatial Viewport"]:::store
-    end
-
-    DF4 --> DB
-    Q4 --> DB
-    DF4 --> UI
-    Q4 --> UI
-    DB --> UI
+    DF4 --> OUT["PostgreSQL 16 & React 18 Workbench<br/>16-Frame Timeline Scrubbing + 3-Mode Viewport"]:::store
+    Q4 --> OUT
 ```
 
 ---
