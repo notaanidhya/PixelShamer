@@ -44,15 +44,18 @@ class VideoDeepfakeInferenceService:
         models_dir = os.path.join(BASE_DIR, "ml", "deepfake", "models")
         
         if video_model_path is None:
-            ff_path = os.path.join(models_dir, "deepfake_video_ff_c23.pt")
             v2_path = os.path.join(models_dir, "deepfake_video_v2.pt")
+            ff_path = os.path.join(models_dir, "deepfake_video_ff_c23.pt")
             v1_path = os.path.join(models_dir, "deepfake_video_best.pt")
-            if os.path.exists(ff_path):
-                video_model_path = ff_path
-            elif os.path.exists(v2_path):
+            if os.path.exists(v2_path):
                 video_model_path = v2_path
+            elif os.path.exists(ff_path):
+                video_model_path = ff_path
             else:
                 video_model_path = v1_path
+
+        self.ff_model = None
+        self.ff_threshold = 0.700
 
         if spatial_model_path is None:
             b5_path = os.path.join(models_dir, "efficientnet_b5_deepfake_best.pt")
@@ -100,6 +103,30 @@ class VideoDeepfakeInferenceService:
             logger.info(f"Successfully loaded video model ({len(matched_state)}/{len(state)} keys). Calibrated threshold: {self.calibrated_threshold:.3f}")
         else:
             logger.warning(f"Video checkpoint not found at {video_model_path}. Initialized with spatial weights.")
+
+        # Load FaceForensics++ c23 secondary validator if present
+        ff_path = os.path.join(models_dir, "deepfake_video_ff_c23.pt")
+        if os.path.exists(ff_path) and video_model_path != ff_path:
+            try:
+                ff_ckpt = torch.load(ff_path, map_location=self.device, weights_only=True)
+                ff_model = build_video_model(
+                    spatial_checkpoint=spatial_model_path,
+                    spatial_backbone=spatial_backbone,
+                    hidden_dim=ff_ckpt.get("hidden_dim", 128),
+                    num_lstm_layers=ff_ckpt.get("num_lstm_layers", 1),
+                    use_projection=ff_ckpt.get("use_projection", True),
+                    freeze_spatial=True
+                ).to(self.device)
+                ff_state = ff_ckpt.get("model_state", ff_ckpt)
+                ff_ms = ff_model.state_dict()
+                ff_matched = {k: v for k, v in ff_state.items() if k in ff_ms and ff_ms[k].shape == v.shape}
+                ff_model.load_state_dict(ff_matched, strict=False)
+                ff_model.eval()
+                self.ff_model = ff_model
+                self.ff_threshold = ff_ckpt.get("optimal_threshold", 0.700)
+                logger.info(f"Loaded secondary FaceForensics++ c23 model ({len(ff_matched)} weights).")
+            except Exception as e:
+                logger.warning(f"Could not load secondary FF model: {e}")
 
         self.model.eval()
         self.extractor = VideoFaceExtractor(target_size=288, default_num_frames=16)
@@ -166,6 +193,21 @@ class VideoDeepfakeInferenceService:
                 model_clip_prob = float(torch.sigmoid(clip_logits)[0, 0].cpu().numpy())
                 frame_probs = torch.sigmoid(frame_logits)[0].cpu().numpy().tolist()
                 attn = attn_weights[0].cpu().numpy().tolist()
+
+            # Secondary model prediction (FaceForensics++ c23) if available
+            ff_score = None
+            if self.ff_model is not None:
+                try:
+                    with torch.no_grad():
+                        ff_c, _, _ = self.ff_model(x, is_pre_extracted=False)
+                        ff_raw = float(torch.sigmoid(ff_c)[0, 0].cpu().numpy())
+                        if ff_raw >= self.ff_threshold:
+                            ff_calib = 0.50 + 0.50 * (ff_raw - self.ff_threshold) / max(0.01, 1.0 - self.ff_threshold)
+                        else:
+                            ff_calib = 0.50 * (ff_raw / max(0.01, self.ff_threshold))
+                        ff_score = float(np.clip(ff_calib, 0.01, 0.99))
+                except Exception as e:
+                    logger.debug(f"Secondary model evaluation bypassed: {e}")
 
             # Identify peak anomalous frame
             peak_idx = int(np.argmax(frame_probs))
@@ -248,6 +290,11 @@ class VideoDeepfakeInferenceService:
             "fake_confidence": round(clip_prob, 4),
             "verdict": verdict,
             "threshold": round(self.calibrated_threshold, 3),
+            "models_evaluated": {
+                "primary": "deepfake_video_v2 (Celeb-DF v2 Regularized Bi-LSTM)",
+                "secondary": "deepfake_video_ff_c23 (FaceForensics++ Multi-Family)" if self.ff_model is not None else None,
+                "faceforensics_c23_confidence": round(ff_score, 4) if ff_score is not None else None
+            },
             "peak_anomaly_timestamp": round(peak_timestamp, 3),
             "peak_anomaly_confidence": round(peak_prob, 4),
             "timeline": timeline,

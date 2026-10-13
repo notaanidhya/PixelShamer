@@ -44,6 +44,7 @@ pnpm-debug.log*
 
 # Data directories and datasets
 uploads/
+uploads_temp/
 /backend/uploads/
 pgdata/
 /data/*

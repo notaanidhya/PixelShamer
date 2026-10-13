@@ -154,9 +154,17 @@ class DeepfakeInferenceService:
         detected_faces = sorted(detected_faces, key=lambda f: f[2] * f[3], reverse=True)
         x, y, fw, fh = detected_faces[0]
 
-        # Apply 1.25x margin with boundary clamping (uniform with video keyframes)
-        margin_x = int(fw * 0.125)
-        margin_y = int(fh * 0.125)
+        aspect = w / float(h)
+        face_ratio = (fw * fh) / float(w * h)
+
+        # For square-ish close-up portraits where face dominates (>= 30% of frame),
+        # preserve full-frame peripheral context to avoid cutting off face-swap boundary seams
+        if 0.80 <= aspect <= 1.25 and max(h, w) <= 800 and face_ratio >= 0.30:
+            return image_bgr, {"x": int(x), "y": int(y), "w": int(fw), "h": int(fh)}
+
+        # Apply generous 1.35x margin with boundary clamping for wider scenes
+        margin_x = int(fw * 0.175)
+        margin_y = int(fh * 0.175)
         x1 = max(0, x - margin_x)
         y1 = max(0, y - margin_y)
         x2 = min(w, x + fw + margin_x)
@@ -240,9 +248,12 @@ class DeepfakeInferenceService:
         crop_overlay, crop_raw_heatmap = self.gradcam.generate_overlay(face_crop, cam_map, alpha=0.35)
 
         # Stitch overlay onto full image if cropped
-        if face_bbox and face_bbox["w"] != image_bgr.shape[1]:
+        if face_bbox and crop_overlay.shape[:2] != image_bgr.shape[:2]:
             full_overlay = image_bgr.copy()
             x, y, w, h = face_bbox["x"], face_bbox["y"], face_bbox["w"], face_bbox["h"]
+            # Resize crop_overlay to bbox size if needed
+            if crop_overlay.shape[:2] != (h, w):
+                crop_overlay = cv2.resize(crop_overlay, (w, h))
             full_overlay[y:y+h, x:x+w] = crop_overlay
             cv2.imwrite(heatmap_disk_path, full_overlay)
         else:
