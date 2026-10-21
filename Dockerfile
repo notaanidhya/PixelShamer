@@ -44,8 +44,8 @@ ENV PYTHONPATH=/app
 ENV FRONTEND_DIST=/app/frontend/dist
 ENV UPLOAD_DIR=/app/backend/uploads
 ENV MODEL_DIR=/app/ml/models
-ENV PORT=7860
+ENV PORT=8000
 
-EXPOSE 7860
+EXPOSE 8000
 
-CMD ["python", "-m", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["sh", "-c", "python -m uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

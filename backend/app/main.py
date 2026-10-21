@@ -69,11 +69,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to load deepfake models during startup: {e}", exc_info=True)
 
-    try:
-        video_deepfake_service.load_models()
-        logger.info("Video Deepfake Detection models loaded successfully.")
-    except Exception as e:
-        logger.error(f"Failed to load video deepfake models during startup: {e}", exc_info=True)
+    # Note: video_deepfake_service is initialized lazily on first video inspection request
+    # to maintain low memory footprint during startup on memory-constrained hosting (e.g. Render 512MB RAM).
 
     yield
     

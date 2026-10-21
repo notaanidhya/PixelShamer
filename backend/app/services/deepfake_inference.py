@@ -186,7 +186,7 @@ class DeepfakeInferenceService:
 
     def analyze_image(self, image_bytes: bytes, original_filename: str, upload_dir: str) -> dict:
         if not self.is_ready:
-            raise RuntimeError("DeepfakeInferenceService is not ready. Models not loaded.")
+            self.load_models()
 
         # 1. Decode image
         nparr = np.frombuffer(image_bytes, np.uint8)
