@@ -330,7 +330,7 @@ export default function WalkthroughTour({
 
   const handleClose = () => {
     try {
-      localStorage.setItem("pixelshamer_tour_seen", "true");
+      localStorage.setItem("pixelshamer_tour_seen_v2", "true");
     } catch (e) {}
     setCurrentStepIdx(0);
     onClose();

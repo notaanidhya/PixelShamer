@@ -30,10 +30,10 @@ export default function App() {
   const [mediaType, setMediaType] = useState("image"); // "image" | "video"
   const [uploadProgress, setUploadProgress] = useState(null);
 
-  // Auto-launch walkthrough for first-time visitors
+  // Auto-launch walkthrough for first-time visitors or on new tour updates
   useEffect(() => {
     try {
-      const hasSeenTour = localStorage.getItem("pixelshamer_tour_seen");
+      const hasSeenTour = localStorage.getItem("pixelshamer_tour_seen_v2");
       if (!hasSeenTour) {
         const timer = setTimeout(() => {
           setIsTourOpen(true);
