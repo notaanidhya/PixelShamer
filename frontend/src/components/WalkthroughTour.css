@@ -59,6 +59,10 @@
   color: var(--text-primary);
 }
 
+.tour-popover.is-intro {
+  width: 470px;
+}
+
 .tour-popover-header {
   display: flex;
   align-items: center;
@@ -78,12 +82,37 @@
   gap: 0.4rem;
 }
 
+.tour-step-badge.intro-badge {
+  color: var(--accent-bright);
+  background: rgba(139, 187, 146, 0.12);
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(139, 187, 146, 0.28);
+}
+
 .tour-step-dot {
   width: 6px;
   height: 6px;
   background: var(--text-highlight);
   border-radius: 50%;
   display: inline-block;
+}
+
+.tour-step-dot.intro-dot {
+  background: var(--accent-bright);
+  box-shadow: 0 0 8px rgba(139, 187, 146, 0.8);
+  animation: tour-intro-pulse 2s ease-in-out infinite;
+}
+
+@keyframes tour-intro-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 0.75;
+  }
 }
 
 .tour-close-btn {
@@ -187,6 +216,10 @@
   background: var(--border-subtle);
   border-radius: 2px;
   transition: all 0.2s;
+}
+
+.tour-progress-pill.pill-intro {
+  border-radius: 3px;
 }
 
 .tour-progress-pill.active {
